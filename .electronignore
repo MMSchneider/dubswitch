@@ -1,0 +1,9 @@
+dist/
+dist-release-*/
+*.zip
+*.log
+.git/
+.DS_Store
+createRelease.sh
+createRelease.txt
+x32-router-*

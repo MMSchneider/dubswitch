@@ -1,0 +1,34 @@
+Here are the updated instructions for packaging and releasing your Electron app for multiple platforms:
+
+1. Install electron-packager (if not already installed)
+npm install --save-dev electron-packager
+
+2. Build for each platform
+macOS Intel (x64):
+npm run package-mac
+
+macOS Silicon (arm64):
+npm run package-mac-arm
+
+Windows (x64):
+npm run package-win
+
+Raspberry Pi/Linux ARM:
+npm run package-linux-arm
+
+3. Zip it
+
+# macOS Intel (x64)
+zip -r x32-router-mac-x64.zip dist/x32-router-darwin-x64
+
+# macOS Silicon (arm64)
+zip -r x32-router-mac-arm64.zip dist/x32-router-darwin-arm64
+
+# Windows (x64)
+zip -r x32-router-win-x64.zip dist/x32-router-win32-x64
+
+# Raspberry Pi/Linux ARM (arm64)
+zip -r x32-router-linux-arm64.zip dist/x32-router-linux-arm64
+
+chmod +x createRelease.sh
+./createRelease.sh

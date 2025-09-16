@@ -1,0 +1,23 @@
+{
+  "name": "dubswitch",
+  "version": "0.0.1",
+  "description": "X32 input router with integrated OSC command panel",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "server": "node server.js",
+    "package-mac": "electron-packager . x32-router --platform=darwin --arch=x64 --out=dist/",
+    "package-mac-arm": "electron-packager . x32-router --platform=darwin --arch=arm64 --out=dist/",
+    "package-win": "electron-packager . x32-router --platform=win32 --arch=x64 --out=dist/",
+    "package-linux-arm": "electron-packager . x32-router --platform=linux --arch=arm64 --out=dist/"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "osc": "^2.4.1",
+    "ws": "^8.12.1"
+  },
+  "devDependencies": {
+    "@electron/packager": "^18.4.4",
+    "electron": "^37.2.3"
+  }
+}

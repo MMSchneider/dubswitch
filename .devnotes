@@ -1,0 +1,2 @@
+DevTools auto-open enabled for packaged app to debug white window issue.
+Remember to remove or gate this in production releases if not desired.
