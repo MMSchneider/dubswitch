@@ -9,7 +9,8 @@
     "package-mac": "electron-packager . x32-router --platform=darwin --arch=x64 --out=dist/",
     "package-mac-arm": "electron-packager . x32-router --platform=darwin --arch=arm64 --out=dist/",
     "package-win": "electron-packager . x32-router --platform=win32 --arch=x64 --out=dist/",
-    "package-linux-arm": "electron-packager . x32-router --platform=linux --arch=arm64 --out=dist/"
+  "package-linux-arm": "electron-packager . x32-router --platform=linux --arch=arm64 --out=dist/",
+  "package-linux-x64": "electron-packager . dubswitch --platform=linux --arch=x64 --out=dist/"
   },
   "dependencies": {
     "express": "^4.18.2",
