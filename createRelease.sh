@@ -42,34 +42,51 @@ for platform in "${selected_platforms[@]}"; do
 		rm -rf "$(pwd)/dist"/*
 		case $platform in
 		mac-x64)
-			npx electron-packager . x32-router --platform=darwin --arch=x64 --out="$(pwd)/dist/" \
-			--ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
+			   npx electron-packager . dubswitch --platform=darwin --arch=x64 --out="$(pwd)/dist/" \
+			   --icon=resources/dubswitch.icns \
+			   --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
 			# Ensure required files are present in the packaged app
-			cp package.json "$(pwd)/dist/x32-router-darwin-x64/"
-			cp main.js "$(pwd)/dist/x32-router-darwin-x64/"
-			[ -f README.md ] && cp README.md "$(pwd)/dist/x32-router-darwin-x64/"
-			[ -f package-lock.json ] && cp package-lock.json "$(pwd)/dist/x32-router-darwin-x64/"
-			zip -r "$dist_dir/x32-router-mac-x64-$tag.zip" "$(pwd)/dist/x32-router-darwin-x64/"
+			   cp package.json "$(pwd)/dist/dubswitch-darwin-x64/"
+			   cp main.js "$(pwd)/dist/dubswitch-darwin-x64/"
+			   [ -f README.md ] && cp README.md "$(pwd)/dist/dubswitch-darwin-x64/"
+			   [ -f package-lock.json ] && cp package-lock.json "$(pwd)/dist/dubswitch-darwin-x64/"
+			   mkdir -p "$(pwd)/dist/dubswitch-mac-x64-tmp/Dubswitch"
+			   cp -R "$(pwd)/dist/dubswitch-darwin-x64/Dubswitch.app" "$(pwd)/dist/dubswitch-mac-x64-tmp/Dubswitch/"
+			   [ -f LICENSE ] && cp LICENSE "$(pwd)/dist/dubswitch-mac-x64-tmp/Dubswitch/"
+			   [ -f README.md ] && cp README.md "$(pwd)/dist/dubswitch-mac-x64-tmp/Dubswitch/"
+			   (cd "$(pwd)/dist/dubswitch-mac-x64-tmp" && zip -r "$dist_dir/dubswitch-mac-x64-$tag.zip" Dubswitch)
+			   rm -rf "$(pwd)/dist/dubswitch-mac-x64-tmp"
 			;;
 		mac-arm64)
-			npx electron-packager . x32-router --platform=darwin --arch=arm64 --out="$(pwd)/dist/" \
-			--ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
+			   npx electron-packager . dubswitch --platform=darwin --arch=arm64 --out="$(pwd)/dist/" \
+			   --icon=resources/dubswitch.icns \
+			   --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
 			# Ensure required files are present in the packaged app
-			cp package.json "$(pwd)/dist/x32-router-darwin-arm64/"
-			cp main.js "$(pwd)/dist/x32-router-darwin-arm64/"
-			[ -f README.md ] && cp README.md "$(pwd)/dist/x32-router-darwin-arm64/"
-			[ -f package-lock.json ] && cp package-lock.json "$(pwd)/dist/x32-router-darwin-arm64/"
-			zip -r "$dist_dir/x32-router-mac-arm64-$tag.zip" "$(pwd)/dist/x32-router-darwin-arm64/"
+			   cp package.json "$(pwd)/dist/dubswitch-darwin-arm64/"
+			   cp main.js "$(pwd)/dist/dubswitch-darwin-arm64/"
+			   [ -f README.md ] && cp README.md "$(pwd)/dist/dubswitch-darwin-arm64/"
+			   [ -f package-lock.json ] && cp package-lock.json "$(pwd)/dist/dubswitch-darwin-arm64/"
+			   mkdir -p "$(pwd)/dist/dubswitch-mac-arm64-tmp/Dubswitch"
+			   cp -R "$(pwd)/dist/dubswitch-darwin-arm64/Dubswitch.app" "$(pwd)/dist/dubswitch-mac-arm64-tmp/Dubswitch/"
+			   [ -f LICENSE ] && cp LICENSE "$(pwd)/dist/dubswitch-mac-arm64-tmp/Dubswitch/"
+			   [ -f README.md ] && cp README.md "$(pwd)/dist/dubswitch-mac-arm64-tmp/Dubswitch/"
+			   (cd "$(pwd)/dist/dubswitch-mac-arm64-tmp" && zip -r "$dist_dir/dubswitch-mac-arm64-$tag.zip" Dubswitch)
+			   rm -rf "$(pwd)/dist/dubswitch-mac-arm64-tmp"
 			;;
 				win-x64)
 						npx electron-packager . x32-router --platform=win32 --arch=x64 --out="$(pwd)/dist/" \
 						--ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
 						# Ensure required files are present in the packaged app
-						cp package.json "$(pwd)/dist/x32-router-win32-x64/"
-						cp main.js "$(pwd)/dist/x32-router-win32-x64/"
-						[ -f README.md ] && cp README.md "$(pwd)/dist/x32-router-win32-x64/"
-						[ -f package-lock.json ] && cp package-lock.json "$(pwd)/dist/x32-router-win32-x64/"
-						zip -r "$dist_dir/x32-router-win-x64-$tag.zip" "$(pwd)/dist/x32-router-win32-x64/"
+						   cp package.json "$(pwd)/dist/dubswitch-win32-x64/"
+						   cp main.js "$(pwd)/dist/dubswitch-win32-x64/"
+						   [ -f README.md ] && cp README.md "$(pwd)/dist/dubswitch-win32-x64/"
+						   [ -f package-lock.json ] && cp package-lock.json "$(pwd)/dist/dubswitch-win32-x64/"
+						   mkdir -p "$(pwd)/dist/dubswitch-win-x64-tmp/Dubswitch"
+						   cp "$(pwd)/dist/dubswitch-win32-x64/Dubswitch.exe" "$(pwd)/dist/dubswitch-win-x64-tmp/Dubswitch/"
+						   [ -f LICENSE ] && cp LICENSE "$(pwd)/dist/dubswitch-win-x64-tmp/Dubswitch/"
+						   [ -f README.md ] && cp README.md "$(pwd)/dist/dubswitch-win-x64-tmp/Dubswitch/"
+						   (cd "$(pwd)/dist/dubswitch-win-x64-tmp" && zip -r "$dist_dir/dubswitch-win-x64-$tag.zip" Dubswitch)
+						   rm -rf "$(pwd)/dist/dubswitch-win-x64-tmp"
 									# Create Windows installer using electron-builder
 									if ! command -v electron-builder >/dev/null 2>&1; then
 										echo "electron-builder not found, installing..."
@@ -81,7 +98,7 @@ cat > win-builder.json <<EOF
 		"appId": "de.dubmajor.x32router",
 		"productName": "x32-router",
 		"directories": {
-			"app": "$(pwd)/dist/x32-router-win32-x64",
+								   "app": "$(pwd)/dist/dubswitch-win32-x64",
 			"output": "$dist_dir"
 		},
 		"win": {
@@ -107,29 +124,39 @@ EOF
 			npx electron-packager . x32-router --platform=linux --arch=arm64 --out="$(pwd)/dist/" \
 			--ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
 			# Ensure required files are present in the packaged app
-			cp package.json "$(pwd)/dist/x32-router-linux-arm64/"
-			cp main.js "$(pwd)/dist/x32-router-linux-arm64/"
-			[ -f README.md ] && cp README.md "$(pwd)/dist/x32-router-linux-arm64/"
-			[ -f package-lock.json ] && cp package-lock.json "$(pwd)/dist/x32-router-linux-arm64/"
-			zip -r "$dist_dir/x32-router-linux-arm64-$tag.zip" "$(pwd)/dist/x32-router-linux-arm64/"
+			   cp package.json "$(pwd)/dist/dubswitch-linux-arm64/"
+			   cp main.js "$(pwd)/dist/dubswitch-linux-arm64/"
+			   [ -f README.md ] && cp README.md "$(pwd)/dist/dubswitch-linux-arm64/"
+			   [ -f package-lock.json ] && cp package-lock.json "$(pwd)/dist/dubswitch-linux-arm64/"
+			   mkdir -p "$(pwd)/dist/dubswitch-linux-arm64-tmp/Dubswitch"
+			   cp "$(pwd)/dist/dubswitch-linux-arm64/dubswitch" "$(pwd)/dist/dubswitch-linux-arm64-tmp/Dubswitch/"
+			   [ -f LICENSE ] && cp LICENSE "$(pwd)/dist/dubswitch-linux-arm64-tmp/Dubswitch/"
+			   [ -f README.md ] && cp README.md "$(pwd)/dist/dubswitch-linux-arm64-tmp/Dubswitch/"
+			   (cd "$(pwd)/dist/dubswitch-linux-arm64-tmp" && zip -r "$dist_dir/dubswitch-linux-arm64-$tag.zip" Dubswitch)
+			   rm -rf "$(pwd)/dist/dubswitch-linux-arm64-tmp"
 			;;
 		linux-x64)
 					 npx electron-packager . x32-router --platform=linux --arch=x64 --out="$(pwd)/dist/" \
 					 --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
 					 # Ensure required files are present in the packaged app
-					 cp package.json "$(pwd)/dist/x32-router-linux-x64/"
-					 cp main.js "$(pwd)/dist/x32-router-linux-x64/"
-					 [ -f README.md ] && cp README.md "$(pwd)/dist/x32-router-linux-x64/"
-					 [ -f package-lock.json ] && cp package-lock.json "$(pwd)/dist/x32-router-linux-x64/"
-					 zip -r "$dist_dir/x32-router-linux-x64-$tag.zip" "$(pwd)/dist/x32-router-linux-x64/"
+					   cp package.json "$(pwd)/dist/dubswitch-linux-x64/"
+					   cp main.js "$(pwd)/dist/dubswitch-linux-x64/"
+					   [ -f README.md ] && cp README.md "$(pwd)/dist/dubswitch-linux-x64/"
+					   [ -f package-lock.json ] && cp package-lock.json "$(pwd)/dist/dubswitch-linux-x64/"
+					   mkdir -p "$(pwd)/dist/dubswitch-linux-x64-tmp/Dubswitch"
+					   cp "$(pwd)/dist/dubswitch-linux-x64/dubswitch" "$(pwd)/dist/dubswitch-linux-x64-tmp/Dubswitch/"
+					   [ -f LICENSE ] && cp LICENSE "$(pwd)/dist/dubswitch-linux-x64-tmp/Dubswitch/"
+					   [ -f README.md ] && cp README.md "$(pwd)/dist/dubswitch-linux-x64-tmp/Dubswitch/"
+					   (cd "$(pwd)/dist/dubswitch-linux-x64-tmp" && zip -r "$dist_dir/dubswitch-linux-x64-$tag.zip" Dubswitch)
+					   rm -rf "$(pwd)/dist/dubswitch-linux-x64-tmp"
 					 # Create .deb package for Linux Mint/Ubuntu/Debian
 					 if ! command -v electron-installer-debian >/dev/null 2>&1; then
 						 echo "electron-installer-debian not found, installing..."
 						 npm install -g electron-installer-debian
 					 fi
 					 mkdir -p "$(pwd)/deb-tmp"
-											 electron-installer-debian \
-													 --src "$(pwd)/dist/x32-router-linux-x64/" \
+											   electron-installer-debian \
+												   --src "$(pwd)/dist/dubswitch-linux-x64/" \
 													 --dest "$(pwd)/deb-tmp" \
 													 --arch amd64 \
 													 --options.version=$tag \
