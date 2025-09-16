@@ -6,15 +6,16 @@
   "scripts": {
     "start": "electron .",
     "server": "node server.js",
-  "package-mac": "electron-packager . dubswitch --platform=darwin --arch=x64 --out=dist/ --icon=resources/dubswitch.icns",
-  "package-mac-arm": "electron-packager . dubswitch --platform=darwin --arch=arm64 --out=dist/ --icon=resources/dubswitch.icns",
-  "package-win": "electron-packager . dubswitch --platform=win32 --arch=x64 --out=dist/ --icon=resources/dubswitch.ico",
-  "package-linux-arm": "electron-packager . dubswitch --platform=linux --arch=arm64 --out=dist/ --icon=resources/dubswitch_1024.png",
-  "package-linux-x64": "electron-packager . dubswitch --platform=linux --arch=x64 --out=dist/ --icon=resources/dubswitch_1024.png"
+    "package-mac": "electron-packager . dubswitch --platform=darwin --arch=x64 --out=dist/ --icon=resources/dubswitch.icns",
+    "package-mac-arm": "electron-packager . dubswitch --platform=darwin --arch=arm64 --out=dist/ --icon=resources/dubswitch.icns",
+    "package-win": "electron-packager . dubswitch --platform=win32 --arch=x64 --out=dist/ --icon=resources/dubswitch.ico",
+    "package-linux-arm": "electron-packager . dubswitch --platform=linux --arch=arm64 --out=dist/ --icon=resources/dubswitch_1024.png",
+    "package-linux-x64": "electron-packager . dubswitch --platform=linux --arch=x64 --out=dist/ --icon=resources/dubswitch_1024.png"
   },
   "dependencies": {
     "express": "^4.18.2",
     "osc": "^2.4.1",
+    "puppeteer": "^20.9.0",
     "ws": "^8.12.1"
   },
   "devDependencies": {
