@@ -266,10 +266,28 @@ function createWs(url) {
 function renderStaticMatrixTable() {
   const container = document.getElementById('matrix-table-container');
   if (!container) return;
+  // If the app has enumerate results, offer them as options in the selects
+  const enumMap = (window.enumerateResults && window.enumerateResults.userPatches) ? window.enumerateResults.userPatches : null;
+  function makeOptions(baseOptions) {
+    let opts = '';
+    for (const o of baseOptions) opts += `<option>${o}</option>`;
+    if (enumMap) {
+      // append enumerated user inputs with readable labels
+      const keys = Object.keys(enumMap).sort((a,b)=>Number(a)-Number(b));
+      for (const ch of keys) {
+        const entry = enumMap[ch] || {};
+        const val = (entry.value != null) ? entry.value : '';
+        const lbl = entry.label ? String(entry.label) : `Ch ${ch}`;
+        opts += `<option value="${val}">${lbl} (${val})</option>`;
+      }
+    }
+    return opts;
+  }
+
   let html = `<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Block</th><th>Toggle Action</th><th>Param</th><th>Per-channel overrides</th></tr></thead><tbody>`;
   for (let i = 0; i < 4; i++) {
     html += `<tr><td>${i+1} (${blocks[i].label})</td>`;
-    html += `<td><select class="form-control form-control-sm" disabled><option>UserIns</option><option selected>LocalIns</option><option>DAW</option><option>AES50A</option><option>AES50B</option><option>Custom</option></select></td>`;
+    html += `<td><select class="form-control form-control-sm" disabled>` + makeOptions(['UserIns','LocalIns','DAW','AES50A','AES50B','Custom']) + `</select></td>`;
     html += `<td><input type="text" class="form-control form-control-sm" disabled placeholder="optional"></td>`;
     html += `<td><button class="btn btn-sm btn-outline-secondary" disabled>Edit</button></td></tr>`;
   }
@@ -279,8 +297,9 @@ function renderStaticMatrixTable() {
   for (let ch = 1; ch <= 32; ch++) {
     const nn = String(ch).padStart(2,'0');
     html += `<tr><td>${nn}</td>`;
-    html += `<td><select class="form-control form-control-sm" disabled><option>LocalIns</option><option>DAW</option><option>UserIns</option></select></td>`;
-    html += `<td><select class="form-control form-control-sm" disabled><option>DAW</option><option>LocalIns</option><option>UserIns</option></select></td>`;
+    // For per-channel selects, include a few common defaults plus enumerated inputs
+    html += `<td><select class="form-control form-control-sm" disabled>` + makeOptions(['LocalIns','DAW','UserIns']) + `</select></td>`;
+    html += `<td><select class="form-control form-control-sm" disabled>` + makeOptions(['DAW','LocalIns','UserIns']) + `</select></td>`;
     html += `</tr>`;
   }
   html += `</tbody></table></div>`;
@@ -376,8 +395,12 @@ window.addEventListener('DOMContentLoaded', ()=>{
             enumBtn.disabled = true; enumBtn.textContent = 'Enumerating…';
             const resp = await fetch('/enumerate-sources');
             const json = await resp.json();
+            // Keep a global copy so other UI pieces (matrix) can reuse results
+            window.enumerateResults = json || {};
             enumContainer.style.display = 'block';
-            enumPre.textContent = JSON.stringify(json, null, 2);
+            enumPre.textContent = JSON.stringify(window.enumerateResults, null, 2);
+            // Re-render matrix picks to reflect newly enumerated user inputs
+            try { renderStaticMatrixTable(); } catch (e) { console.warn('re-render matrix after enumerate failed', e); }
             // create CSV for download
             if (enumDownload) {
               enumDownload.onclick = () => {
@@ -398,6 +421,9 @@ window.addEventListener('DOMContentLoaded', ()=>{
               };
             }
             enumClear.onclick = () => { enumContainer.style.display = 'none'; enumPre.textContent = ''; };
+            // Also clear global cache and re-render matrix when using clear
+            const _origClear = enumClear.onclick;
+            enumClear.onclick = () => { window.enumerateResults = null; try { renderStaticMatrixTable(); } catch (e) {} ; if (_origClear) _origClear(); };
           } catch (e) { console.error('enumerate failed', e); showToast('Enumerate failed'); }
           finally { enumBtn.disabled = false; enumBtn.textContent = 'Enumerate Sources'; }
         };
