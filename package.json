@@ -10,9 +10,9 @@
     "package-mac-arm": "electron-packager . dubswitch --platform=darwin --arch=arm64 --out=dist/ --icon=resources/dubswitch.icns",
     "package-win": "electron-packager . dubswitch --platform=win32 --arch=x64 --out=dist/ --icon=resources/dubswitch.ico",
     "package-linux-arm": "electron-packager . dubswitch --platform=linux --arch=arm64 --out=dist/ --icon=resources/dubswitch_1024.png",
-    "package-linux-x64": "electron-packager . dubswitch --platform=linux --arch=x64 --out=dist/ --icon=resources/dubswitch_1024.png"
+    "package-linux-x64": "electron-packager . dubswitch --platform=linux --arch=x64 --out=dist/ --icon=resources/dubswitch_1024.png",
+    "test:headless": "node scripts/run-headless-tests.js"
   },
-  "test:headless": "node scripts/run-headless-tests.js",
   "dependencies": {
     "express": "^4.18.2",
     "osc": "^2.4.1",

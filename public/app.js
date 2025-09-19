@@ -120,6 +120,7 @@ function refreshUserPatches() {
       // mark as pending so UI shows spinner until at least one reply
       window.userPatchesPending = true;
       renderUserPatches();
+      try { renderStaticMatrixTable(); } catch (e) {}
       return;
     }
     if (typeof renderUserPatches === 'function') renderUserPatches();
@@ -133,6 +134,7 @@ function setAllUserPatchesLocal() {
     for (let ch = 1; ch <= 32; ch++) { window.userPatches[ch] = ch; }
     safeSendWs(JSON.stringify({ type: 'toggle_inputs', targets: (window.blocks||[]).map(b => b.localin || 0) }));
     if (typeof renderUserPatches === 'function') renderUserPatches();
+    try { renderStaticMatrixTable(); if (window.persistCurrentMatrix) window.persistCurrentMatrix(); } catch (e) {}
   } catch (e) { console.error('setAllUserPatchesLocal failed', e); }
 }
 
@@ -142,6 +144,7 @@ function setAllUserPatchesCard() {
     for (let ch = 1; ch <= 32; ch++) { window.userPatches[ch] = 128 + ch; }
     safeSendWs(JSON.stringify({ type: 'toggle_inputs', targets: (window.blocks||[]).map(b => b.userin || 0) }));
     if (typeof renderUserPatches === 'function') renderUserPatches();
+    try { renderStaticMatrixTable(); if (window.persistCurrentMatrix) window.persistCurrentMatrix(); } catch (e) {}
   } catch (e) { console.error('setAllUserPatchesCard failed', e); }
 }
 
@@ -269,28 +272,79 @@ function renderStaticMatrixTable() {
   // If the app has enumerate results, offer them as options in the selects
   const enumMap = (window.enumerateResults && window.enumerateResults.userPatches) ? window.enumerateResults.userPatches : null;
   function makeOptions(baseOptions, selectedVal) {
-    let opts = '';
-    for (const o of baseOptions) {
-      const v = String(o);
-      const sel = (selectedVal != null && String(selectedVal) === v) ? ' selected' : '';
-      opts += `<option value="${v}"${sel}>${o}</option>`;
+    // Helper to render numeric values as friendly labels
+    function prettyValLabel(raw) {
+      const n = Number(raw);
+      if (!Number.isFinite(n)) return String(raw);
+      if (n >= 129 && n <= 160) return `DAW(${String(n - 128)})`;
+      if (n >= 1 && n <= 32) return `LocalIns(${String(n)})`;
+      return String(n);
     }
+    // Build ordered map of value -> display label to avoid duplicate entries
+    const entries = [];
+    const seen = new Set();
+    function pushEntry(value, label) {
+      const v = String(value);
+      if (seen.has(v)) return;
+      seen.add(v);
+      entries.push({ v, label });
+    }
+    // base options (skip plain DAW/LocalIns/UserIns) -- we don't want a
+    // literal 'UserIns' entry in the dropdowns, prefer numeric or
+    // enumerated entries instead.
+    for (const o of baseOptions) {
+      const lc = String(o).toLowerCase();
+      if (lc === 'daw' || lc === 'localins' || lc === 'userins') continue;
+      pushEntry(o, String(o));
+    }
+    // numeric LocalIns then DAW
+    for (let ch = 1; ch <= 32; ch++) pushEntry(String(ch), `LocalIns(${String(ch)})`);
+    for (let ch = 1; ch <= 32; ch++) pushEntry(String(128 + ch), `DAW(${String(ch)})`);
+    // enumerated entries: prefer their label, but show pretty mapping too
     if (enumMap) {
-      // append enumerated user inputs with readable labels
       const keys = Object.keys(enumMap).sort((a,b)=>Number(a)-Number(b));
       for (const ch of keys) {
         const entry = enumMap[ch] || {};
         const val = (entry.value != null) ? String(entry.value) : '';
         const lbl = entry.label ? String(entry.label) : `Ch ${ch}`;
-        const sel = (selectedVal != null && String(selectedVal) === val) ? ' selected' : '';
-        opts += `<option value="${val}"${sel}>${lbl} (${val})</option>`;
+        const pretty = (val && !isNaN(Number(val))) ? prettyValLabel(val) : `${lbl} (${val})`;
+        let displayLabel = `${lbl} — ${pretty}`;
+        try {
+          const l = (lbl || '').toString().trim().toLowerCase();
+          const p = (pretty || '').toString().trim().toLowerCase();
+          if (l && p && (p.includes(l) || l.includes(p) || l === p)) displayLabel = pretty;
+        } catch (e) {}
+        // If value already exists, replace its label with the more descriptive enumerated label
+        if (seen.has(String(val))) {
+          // find and update
+          for (const it of entries) {
+            if (it.v === String(val)) { it.label = displayLabel; break; }
+          }
+        } else {
+          pushEntry(val, displayLabel);
+        }
       }
     }
+
+    // Build option HTML, marking selectedVal if present
+    let opts = '';
+    for (const e of entries) {
+      const sel = (selectedVal != null && String(selectedVal) === e.v) ? ' selected' : '';
+      opts += `<option value="${e.v}"${sel}>${e.label}</option>`;
+    }
+    // If selectedVal wasn't found in entries, prepend a fallback option
+    try {
+      if (selectedVal != null && !seen.has(String(selectedVal))) {
+        const pretty = (!isNaN(Number(selectedVal))) ? prettyValLabel(selectedVal) : String(selectedVal);
+        opts = `<option value="${String(selectedVal)}" selected>${pretty}</option>` + opts;
+      }
+    } catch (e) {}
     return opts;
   }
 
   // Block-level configuration has been removed; keep a short explanatory note
   let html = `<div class="small-muted" style="margin-bottom:8px">Block-level toggle configuration has been removed. Use the per-channel A/B table below to inspect or reference enumerated inputs.</div>`;
+  // Legend removed — only show explanatory note and the per-channel table
   // Per-channel A/B view (visual only)
   html += `<div class="table-responsive" style="margin-top:12px"><table class="table table-sm"><thead><tr><th>Ch</th><th>A</th><th>B</th></tr></thead><tbody>`;
   for (let ch = 1; ch <= 32; ch++) {
@@ -298,13 +352,120 @@ function renderStaticMatrixTable() {
     html += `<tr><td>${nn}</td>`;
     // For per-channel selects, include a few common defaults plus enumerated inputs.
     // If we have an enumerated value for this channel, pre-select it in column A.
-    const enumVal = enumMap && enumMap[nn] && enumMap[nn].value != null ? enumMap[nn].value : null;
-    html += `<td><select class="form-control form-control-sm" disabled>` + makeOptions(['LocalIns','DAW','UserIns'], enumVal) + `</select></td>`;
-    html += `<td><select class="form-control form-control-sm" disabled>` + makeOptions(['DAW','LocalIns','UserIns'], null) + `</select></td>`;
+  // Determine preselected values: prefer persisted server matrix then enumerate map
+  const persisted = (window._persistedMatrix && window._persistedMatrix[nn]) ? window._persistedMatrix[nn] : null;
+  const aPersist = persisted && persisted.a != null ? String(persisted.a) : null;
+  const bPersist = persisted && persisted.b != null ? String(persisted.b) : null;
+  const enumVal = (aPersist != null)
+    ? aPersist
+    : (enumMap && enumMap[nn] && enumMap[nn].value != null ? String(enumMap[nn].value) : null);
+  // Determine B value: prefer persisted B, otherwise default to the opposite
+  // of A (DAW <-> LocalIns mapping). If A is non-numeric or unknown, leave B empty.
+  let enumValB = null;
+  if (bPersist != null) {
+    enumValB = bPersist;
+  } else if (enumVal != null && !isNaN(Number(enumVal))) {
+    const aval = Number(enumVal);
+    if (aval >= 129 && aval <= 160) {
+      // A is DAW -> B should be LocalIns (1..32)
+      enumValB = String(aval - 128);
+    } else if (aval >= 1 && aval <= 32) {
+      // A is LocalIns -> B should be DAW (129..160)
+      enumValB = String(128 + aval);
+    }
+  }
+  html += `<td><select class="form-control form-control-sm matrix-select-a" data-ch="${nn}">` + makeOptions(['LocalIns','DAW','UserIns'], enumVal) + `</select></td>`;
+  html += `<td><select class="form-control form-control-sm matrix-select-b" data-ch="${nn}">` + makeOptions(['DAW','LocalIns','UserIns'], enumValB) + `</select></td>`;
     html += `</tr>`;
   }
   html += `</tbody></table></div>`;
   container.innerHTML = html;
+
+  // Legend removed per user request.
+
+  // Wire change handlers: when any select changes, send the full matrix
+  // state to the server (debounced) so the server persists the full mapping.
+  let changeDebounce = null;
+  // flag used to indicate we are awaiting the server's broadcast confirming persistence
+  let awaitingMatrixBroadcast = false;
+
+  function sendFullMatrixState() {
+    try {
+      const body = {};
+      // Build a mapping for channels '01'..'32'
+      for (let ch = 1; ch <= 32; ch++) {
+        const nn = String(ch).padStart(2, '0');
+        const aEl = document.querySelector(`.matrix-select-a[data-ch="${nn}"]`);
+        const bEl = document.querySelector(`.matrix-select-b[data-ch="${nn}"]`);
+        const aVal = aEl ? aEl.value : null; const bVal = bEl ? bEl.value : null;
+        body[nn] = { a: aVal, b: bVal };
+      }
+      // POST the full matrix and mark that we're awaiting the server's
+      // authoritative broadcast. Do not show a toast here — wait for WS.
+      try {
+        awaitingMatrixBroadcast = true;
+        const payload = JSON.stringify(body);
+        console.debug('[UI] Sending matrix payload', body);
+        fetch('/set-channel-matrix', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+          .then(async (r) => {
+            if (!r.ok) {
+              // try to read response body for a helpful message
+              let text = '';
+              try { text = await r.text(); } catch (e) { text = '' + e; }
+              throw new Error(`HTTP ${r.status} ${r.statusText} ${text ? '- ' + text : ''}`);
+            }
+            return r.json();
+          })
+          .then(j => {
+            if (j && j.matrix) window._persistedMatrix = j.matrix;
+            // keep awaitingMatrixBroadcast true until server sends WS 'matrix_update'
+          })
+          .catch((err)=>{
+            console.error('persist matrix failed', err);
+            awaitingMatrixBroadcast = false;
+            try { showToast('Failed to save matrix: ' + (err && err.message ? err.message : 'network error')); } catch(e){}
+          });
+      } catch (e) {
+        console.error('persist matrix unexpected error', e);
+        awaitingMatrixBroadcast = false;
+        try { showToast('Failed to save matrix: ' + (e && e.message ? e.message : 'unknown error')); } catch(e){}
+      }
+    } catch (e) {}
+  }
+  // expose for other UI actions to trigger (buttons etc.)
+  window.persistCurrentMatrix = function(){ if (changeDebounce) clearTimeout(changeDebounce); sendFullMatrixState(); };
+  document.querySelectorAll('.matrix-select-a, .matrix-select-b').forEach(sel => {
+    sel.addEventListener('change', (ev)=>{
+      try {
+        const target = ev.currentTarget || ev.target;
+        const ch = target.getAttribute('data-ch');
+        const isA = target.classList.contains('matrix-select-a');
+        // If A changed and there's no persisted B, auto-fill B to the opposite
+        if (isA) {
+          try {
+            const aVal = target.value;
+            const persistedRow = (window._persistedMatrix && window._persistedMatrix[ch]) ? window._persistedMatrix[ch] : null;
+            const bEl = document.querySelector(`.matrix-select-b[data-ch="${ch}"]`);
+            // Only auto-set B when server doesn't already have a stored value for B
+            if (bEl && (!persistedRow || persistedRow.b == null)) {
+              if (!isNaN(Number(aVal))) {
+                const n = Number(aVal);
+                let newB = null;
+                if (n >= 129 && n <= 160) newB = String(n - 128);
+                else if (n >= 1 && n <= 32) newB = String(128 + n);
+                if (newB != null) {
+                  // set value if different
+                  if (bEl.value !== String(newB)) bEl.value = String(newB);
+                }
+              }
+            }
+          } catch (e) { /* ignore fill errors */ }
+        }
+      } catch (e) {}
+      if (changeDebounce) clearTimeout(changeDebounce);
+      changeDebounce = setTimeout(()=>{ sendFullMatrixState(); changeDebounce = null; }, 350);
+    }, { passive: true });
+  });
 }
 
 // Render static table once DOM ready
@@ -464,7 +625,26 @@ function handleWsMessage(ev) {
   try {
     const raw = ev && ev.data ? ev.data : ev;
     const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
-    if (!data || !data.type) return;
+
+    // Handle server broadcast for persisted matrix updates first
+    if (data && data.type === 'matrix_update') {
+        if (data.matrix) window._persistedMatrix = data.matrix;
+        try { renderStaticMatrixTable(); } catch (e) {}
+        try {
+          const savedEl = document.getElementById('matrix-saved-indicator');
+          if (awaitingMatrixBroadcast && savedEl) {
+            // show inline Saved indicator briefly
+            savedEl.style.display = '';
+            setTimeout(()=>{ try { savedEl.style.display = 'none'; } catch(e){} }, 1400);
+            awaitingMatrixBroadcast = false;
+          } else {
+            // If we weren't the originator, show a brief toast to inform users
+            try { showToast('Matrix updated'); } catch (e) {}
+          }
+        } catch (e) {}
+        return;
+    }
+
     switch (data.type) {
       case 'ping':
         window.lastX32Ip = data.from || window.lastX32Ip || null;
@@ -494,12 +674,10 @@ function handleWsMessage(ev) {
             const m = data.address.match(/in\/(\d{2})$/);
             if (m && data.args && data.args.length) {
               const ch = Number(m[1]);
-              // data.args[0] may be an OSC metadata object {type:'i', value:129}
-              const raw = data.args[0];
-              const val = (raw && typeof raw === 'object' && 'value' in raw) ? raw.value : raw;
+              const rawArg = data.args[0];
+              const val = (rawArg && typeof rawArg === 'object' && 'value' in rawArg) ? rawArg.value : rawArg;
               window.userPatches = window.userPatches || {}; window.userPatches[ch] = Number(val);
               console.debug('[UI] Received userpatch for ch', ch, '=>', window.userPatches[ch]);
-              // First reply received: clear pending spinner and render tiles
               try { window.userPatchesPending = false; renderUserPatches(); checkUserIns(); } catch (e) {}
             }
           } else if (/^\/ch\/(\d{2})\/config\/name$/.test(data.address)) {
@@ -740,6 +918,8 @@ function toggleAllInputs() {
       const targets = blocks.map(b => allLocal ? b.userin : b.localin);
       safeSendWs(JSON.stringify({ type: 'toggle_inputs', targets }));
       setTimeout(()=>safeSendWs(JSON.stringify({ type: 'load_routing' })), 500);
+      // Re-render and persist matrix shortly after toggling so UI reflects new state
+      setTimeout(()=>{ try { renderStaticMatrixTable(); if (window.persistCurrentMatrix) window.persistCurrentMatrix(); } catch (e){} }, 700);
     } catch (e) {
       console.error('toggleAllInputs send failed', e);
       _enableToggleInputsBtn();
@@ -869,10 +1049,26 @@ function renderUserPatches(){
     btn.onclick = (e) => {
       if (pending) return; // disable interaction while reads are pending
       if(e.target === nameEl) return;
-      // Use per-channel mapping if available, otherwise fallback to original Local/Daw toggle
-      const mapping = channelMatrix[ch] || { aAction: 'LocalIns', bAction: 'DAW', param: null };
-      const aVal = computeValueForAction(ch, mapping.aAction, mapping.param);
-      const bVal = computeValueForAction(ch, mapping.bAction, mapping.param);
+      // Prefer server-persisted per-channel numeric mappings (window._persistedMatrix)
+      // If not present or non-numeric, fall back to the in-memory channelMatrix
+      let aVal = null, bVal = null;
+      // Ensure mapping is available in this scope so diagnostics can reference it safely
+      let mapping = channelMatrix[ch] || { aAction: 'LocalIns', bAction: 'DAW', param: null };
+      try {
+        const nnKey = String(ch).padStart(2,'0');
+        const persistedRow = (window._persistedMatrix && window._persistedMatrix[nnKey]) ? window._persistedMatrix[nnKey] : null;
+        if (persistedRow) {
+          const pa = persistedRow.a != null ? Number(persistedRow.a) : NaN;
+          const pb = persistedRow.b != null ? Number(persistedRow.b) : NaN;
+          if (Number.isFinite(pa)) aVal = pa;
+          if (Number.isFinite(pb)) bVal = pb;
+        }
+      } catch (e) {}
+      // Fallback to computed actions if persisted numeric values are not available
+      if (!Number.isFinite(aVal) || !Number.isFinite(bVal)) {
+        if (!Number.isFinite(aVal)) aVal = computeValueForAction(ch, mapping.aAction, mapping.param);
+        if (!Number.isFinite(bVal)) bVal = computeValueForAction(ch, mapping.bAction, mapping.param);
+      }
       // Default currentVal to A if we don't have an explicit userPatch
       const currentVal = (userPatches[ch] != null) ? Number(userPatches[ch]) : aVal;
       let targetVal = null;

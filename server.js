@@ -218,12 +218,69 @@ app.post('/set-channel-matrix', (req, res) => {
     for (const ch of entries) {
       persistedMatrix[ch] = body[ch];
     }
-    // Persist to disk
-    try { fs.writeFileSync(MATRIX_PATH, JSON.stringify(persistedMatrix, null, 2), 'utf8'); } catch (e) { console.warn('Failed to write matrix.json', e && e.message); }
+    // Persist to disk atomically (write to temp then rename) and reload
+    try {
+      const tmp = MATRIX_PATH + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(persistedMatrix, null, 2), 'utf8');
+      fs.renameSync(tmp, MATRIX_PATH);
+      try {
+        // Reload canonical matrix from disk to ensure we return what was actually written
+        const raw = fs.readFileSync(MATRIX_PATH, 'utf8') || '{}';
+        persistedMatrix = JSON.parse(raw) || persistedMatrix;
+      } catch (e) {
+        console.warn('Failed to reload matrix.json after write:', e && e.message);
+      }
+    } catch (e) {
+      // Enhanced error logging to aid debugging when clients report save failures
+      try {
+        const errDetails = { message: (e && e.message) || String(e), stack: (e && e.stack) || null };
+        console.error('Failed to write matrix.json atomically:', errDetails);
+        // Attempt a fallback write directly (non-atomic) and log outcome
+        try {
+          fs.writeFileSync(MATRIX_PATH, JSON.stringify(persistedMatrix, null, 2), 'utf8');
+          console.warn('Fallback: wrote matrix.json directly (non-atomic) after atomic write failed');
+        } catch (e2) {
+          console.error('Fallback write also failed:', e2 && e2.message);
+        }
+      } catch (inner) { console.error('Error while logging matrix.json write failure', inner && inner.message); }
+    }
     // Broadcast to connected WebSocket clients to refresh their UIs
     wss.clients.forEach(ws => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'matrix_update', matrix: persistedMatrix })); });
+    // Always return the canonical persisted matrix so clients re-render server truth
     return res.json({ ok: true, matrix: persistedMatrix });
   } catch (e) { return res.status(500).json({ error: String(e && e.message) }); }
+});
+
+// Troubleshooting helper: report matrix.json file status, ownership and a small sample
+app.get('/troubleshoot/matrix-file', (req, res) => {
+  try {
+    const info = { path: MATRIX_PATH, exists: false };
+    try {
+      const stat = fs.statSync(MATRIX_PATH);
+      info.exists = true;
+      info.size = stat.size;
+      info.mtime = stat.mtime;
+      info.uid = stat.uid;
+      info.gid = stat.gid;
+      info.mode = (stat.mode & 0o777).toString(8);
+    } catch (e) {
+      // file missing or inaccessible
+      info.exists = false;
+      info.error = (e && e.message) || String(e);
+    }
+    // Try a small read if possible
+    if (info.exists) {
+      try {
+        const raw = fs.readFileSync(MATRIX_PATH, 'utf8');
+        info.sample = raw.length > 2000 ? raw.slice(0, 2000) + '\n...[truncated]' : raw;
+      } catch (e) {
+        info.readError = (e && e.message) || String(e);
+      }
+    }
+    return res.json({ ok: true, info });
+  } catch (e) {
+    return res.status(500).json({ ok: false, error: (e && e.message) || String(e) });
+  }
 });
 
 oscPort.on('error', err => console.error('UDP OSC Error:', err && err.message));
