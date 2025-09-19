@@ -268,17 +268,22 @@ function renderStaticMatrixTable() {
   if (!container) return;
   // If the app has enumerate results, offer them as options in the selects
   const enumMap = (window.enumerateResults && window.enumerateResults.userPatches) ? window.enumerateResults.userPatches : null;
-  function makeOptions(baseOptions) {
+  function makeOptions(baseOptions, selectedVal) {
     let opts = '';
-    for (const o of baseOptions) opts += `<option>${o}</option>`;
+    for (const o of baseOptions) {
+      const v = String(o);
+      const sel = (selectedVal != null && String(selectedVal) === v) ? ' selected' : '';
+      opts += `<option value="${v}"${sel}>${o}</option>`;
+    }
     if (enumMap) {
       // append enumerated user inputs with readable labels
       const keys = Object.keys(enumMap).sort((a,b)=>Number(a)-Number(b));
       for (const ch of keys) {
         const entry = enumMap[ch] || {};
-        const val = (entry.value != null) ? entry.value : '';
+        const val = (entry.value != null) ? String(entry.value) : '';
         const lbl = entry.label ? String(entry.label) : `Ch ${ch}`;
-        opts += `<option value="${val}">${lbl} (${val})</option>`;
+        const sel = (selectedVal != null && String(selectedVal) === val) ? ' selected' : '';
+        opts += `<option value="${val}"${sel}>${lbl} (${val})</option>`;
       }
     }
     return opts;
@@ -291,9 +296,11 @@ function renderStaticMatrixTable() {
   for (let ch = 1; ch <= 32; ch++) {
     const nn = String(ch).padStart(2,'0');
     html += `<tr><td>${nn}</td>`;
-    // For per-channel selects, include a few common defaults plus enumerated inputs
-    html += `<td><select class="form-control form-control-sm" disabled>` + makeOptions(['LocalIns','DAW','UserIns']) + `</select></td>`;
-    html += `<td><select class="form-control form-control-sm" disabled>` + makeOptions(['DAW','LocalIns','UserIns']) + `</select></td>`;
+    // For per-channel selects, include a few common defaults plus enumerated inputs.
+    // If we have an enumerated value for this channel, pre-select it in column A.
+    const enumVal = enumMap && enumMap[nn] && enumMap[nn].value != null ? enumMap[nn].value : null;
+    html += `<td><select class="form-control form-control-sm" disabled>` + makeOptions(['LocalIns','DAW','UserIns'], enumVal) + `</select></td>`;
+    html += `<td><select class="form-control form-control-sm" disabled>` + makeOptions(['DAW','LocalIns','UserIns'], null) + `</select></td>`;
     html += `</tr>`;
   }
   html += `</tbody></table></div>`;
@@ -302,6 +309,22 @@ function renderStaticMatrixTable() {
 
 // Render static table once DOM ready
 window.addEventListener('DOMContentLoaded', ()=>{ renderStaticMatrixTable(); });
+// Attempt to fetch enumerate results at startup so the Matrix A column
+// pre-selects known enumerated sources when available.
+window.addEventListener('DOMContentLoaded', async ()=>{
+  try {
+    if (!window.enumerateResults) {
+      const resp = await fetch('/enumerate-sources');
+      if (resp && resp.ok) {
+        const json = await resp.json();
+        if (json) {
+          window.enumerateResults = json;
+          try { renderStaticMatrixTable(); } catch (e) {}
+        }
+      }
+    }
+  } catch (e) { /* ignore failures silently */ }
+});
 
 // Rebind important DOM elements once the DOM is ready and render routing
 // table so it appears in the correct tab. Previously these globals were
