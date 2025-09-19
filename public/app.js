@@ -284,14 +284,8 @@ function renderStaticMatrixTable() {
     return opts;
   }
 
-  let html = `<div class="table-responsive"><table class="table table-sm"><thead><tr><th>Block</th><th>Toggle Action</th><th>Param</th><th>Per-channel overrides</th></tr></thead><tbody>`;
-  for (let i = 0; i < 4; i++) {
-    html += `<tr><td>${i+1} (${blocks[i].label})</td>`;
-    html += `<td><select class="form-control form-control-sm" disabled>` + makeOptions(['UserIns','LocalIns','DAW','AES50A','AES50B','Custom']) + `</select></td>`;
-    html += `<td><input type="text" class="form-control form-control-sm" disabled placeholder="optional"></td>`;
-    html += `<td><button class="btn btn-sm btn-outline-secondary" disabled>Edit</button></td></tr>`;
-  }
-  html += `</tbody></table></div>`;
+  // Block-level configuration has been removed; keep a short explanatory note
+  let html = `<div class="small-muted" style="margin-bottom:8px">Block-level toggle configuration has been removed. Use the per-channel A/B table below to inspect or reference enumerated inputs.</div>`;
   // Per-channel A/B view (visual only)
   html += `<div class="table-responsive" style="margin-top:12px"><table class="table table-sm"><thead><tr><th>Ch</th><th>A</th><th>B</th></tr></thead><tbody>`;
   for (let ch = 1; ch <= 32; ch++) {
