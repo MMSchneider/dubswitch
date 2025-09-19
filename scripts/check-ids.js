@@ -1,6 +1,6 @@
 const puppeteer = require('puppeteer');
 (async () => {
-  const url = process.argv[2] || 'http://localhost:3000/index2.html';
+  const url = process.argv[2] || 'http://localhost:3000/index.html';
   const browser = await puppeteer.launch({ args: ['--no-sandbox','--disable-setuid-sandbox'] });
   const page = await browser.newPage();
   try {
