@@ -551,10 +551,7 @@ function checkUserIns() {
     if (Number(routingState[i]) === b.localin) blocked.push(i);
   });
   // If user opted to allow toggles even while block is LocalIns, treat blocked as empty
-  try {
-    const allowLocal = localStorage.getItem('matrixAllowLocalToggle') === '1' || (document.getElementById('matrix-allow-local-toggle') && document.getElementById('matrix-allow-local-toggle').checked);
-    if (allowLocal) blocked.length = 0;
-  } catch (e) {}
+  // (matrix-allow-local-toggle removed: default to be conservative)
   // Build a friendly status message if any blocks are blocked (but not all)
   if (blocked.length > 0) {
     const labels = blocked.map(i=>blocks[i].label).join(', ');
@@ -590,18 +587,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     safeSendWs(JSON.stringify({type:'toggle_inputs',targets:blocks.map(b=>b.userin)}));
     setTimeout(()=>safeSendWs(JSON.stringify({type:'load_routing'})),500);
   };
-  // Initialize 'allow local toggle' checkbox from localStorage
-  try {
-    const el = document.getElementById('matrix-allow-local-toggle');
-    if (el) {
-      el.checked = localStorage.getItem('matrixAllowLocalToggle') === '1';
-      el.addEventListener('change', () => {
-        try { localStorage.setItem('matrixAllowLocalToggle', el.checked ? '1' : '0'); } catch (e) {}
-        // re-evaluate enable/disable state
-        try { checkUserIns(); } catch (e) {}
-      });
-    }
-  } catch (e) {}
+  // 'matrix-allow-local-toggle' checkbox removed from UI; no initialization required
 });
 
 function renderRoutingTable(){
@@ -1057,16 +1043,7 @@ function openOverridesModal(blockIdx) {
 // Neutralize any previously-installed WS matrix bridge
 try { window.handleMatrixWs = function(){ /* matrix messages ignored */ }; } catch (e) {}
 
-// Prevent autosaving inferred matrices (no-op guard)
-try {
-  const autosaveEl = document.getElementById('matrix-autosave');
-  if (autosaveEl) {
-    autosaveEl.checked = false;
-    autosaveEl.disabled = true;
-  }
-  const allowLocalEl = document.getElementById('matrix-allow-local-toggle');
-  if (allowLocalEl) allowLocalEl.disabled = false; // keep allow-local toggling available
-} catch (e) {}
+// Autosave / allow-local toggles removed from UI; no-op guards removed
 
 // Ensure the static matrix is rendered on load (idempotent)
 window.addEventListener('DOMContentLoaded', () => { try { renderStaticMatrixTable(); } catch (e) {} });
