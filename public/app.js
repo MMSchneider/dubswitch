@@ -205,6 +205,19 @@ function computeValueForAction(ch, action, param) {
 }
 // --- end additional stubs ---
 
+// Human-friendly source label for numeric values used across the UI
+function prettySourceLabel(raw) {
+  try {
+    const n = Number(raw);
+    if (!Number.isFinite(n)) return String(raw || 'Other');
+    if (n >= 129 && n <= 160) return `DAW(${String(n - 128)})`;
+    if (n >= 81 && n <= 128) return `AES50B(${String(n - 80)})`;
+    if (n >= 33 && n <= 80) return `AES50A(${String(n - 32)})`;
+    if (n >= 1 && n <= 32) return `Local(${String(n)})`;
+    return String(n);
+  } catch (e) { return String(raw); }
+}
+
 // Refresh user patches UI — small wrapper used by some code paths.
 function refreshUserPatches() {
   try {
@@ -277,7 +290,9 @@ function renderStaticMatrixTable() {
       const n = Number(raw);
       if (!Number.isFinite(n)) return String(raw);
       if (n >= 129 && n <= 160) return `DAW(${String(n - 128)})`;
-      if (n >= 1 && n <= 32) return `LocalIns(${String(n)})`;
+      if (n >= 81 && n <= 128) return `AES50B(${String(n - 80)})`;
+      if (n >= 33 && n <= 80) return `AES50A(${String(n - 32)})`;
+      if (n >= 1 && n <= 32) return `Local(${String(n)})`;
       return String(n);
     }
     // Build ordered map of value -> display label to avoid duplicate entries
@@ -294,12 +309,16 @@ function renderStaticMatrixTable() {
     // enumerated entries instead.
     for (const o of baseOptions) {
       const lc = String(o).toLowerCase();
-      if (lc === 'daw' || lc === 'localins' || lc === 'userins') continue;
+      if (lc === 'daw' || lc === 'localins' || lc === 'local' || lc === 'userins') continue;
       pushEntry(o, String(o));
     }
-    // numeric LocalIns then DAW
-    for (let ch = 1; ch <= 32; ch++) pushEntry(String(ch), `LocalIns(${String(ch)})`);
-    for (let ch = 1; ch <= 32; ch++) pushEntry(String(128 + ch), `DAW(${String(ch)})`);
+  // numeric LocalIns, AES50A, AES50B, then DAW
+  for (let ch = 1; ch <= 32; ch++) pushEntry(String(ch), `Local(${String(ch)})`);
+  // AES50A: 33..80 -> AES50A(1..48)
+  for (let ch = 1; ch <= 48; ch++) pushEntry(String(32 + ch), `AES50A(${String(ch)})`);
+  // AES50B: 81..128 -> AES50B(1..48)
+  for (let ch = 1; ch <= 48; ch++) pushEntry(String(80 + ch), `AES50B(${String(ch)})`);
+  for (let ch = 1; ch <= 32; ch++) pushEntry(String(128 + ch), `DAW(${String(ch)})`);
     // enumerated entries: prefer their label, but show pretty mapping too
     if (enumMap) {
       const keys = Object.keys(enumMap).sort((a,b)=>Number(a)-Number(b));
@@ -972,14 +991,11 @@ function renderUserPatches(){
       }
     }
     const uVal=userPatches[ch]||ch;
-    let patchTypeText = "";
-    if(uVal>=1&&uVal<=32){
-      patchTypeText = "Local";
-    } else if(uVal>=129&&uVal<=160){
-      patchTypeText = "DAW";
-    } else {
-      patchTypeText = "Other";
-    }
+    // Always show a friendly, pretty label for the current source value
+    let patchTypeText = 'Unknown';
+    try {
+      patchTypeText = prettySourceLabel(uVal != null ? uVal : '');
+    } catch (e) { patchTypeText = (uVal != null) ? String(uVal) : 'Unknown'; }
     html+=`
       <div id="card-${nn}" class="channel-card card">
         <div id="led-${nn}" class="led-top"></div>
@@ -1048,7 +1064,6 @@ function renderUserPatches(){
     };
     btn.onclick = (e) => {
       if (pending) return; // disable interaction while reads are pending
-      if(e.target === nameEl) return;
       // Prefer server-persisted per-channel numeric mappings (window._persistedMatrix)
       // If not present or non-numeric, fall back to the in-memory channelMatrix
       let aVal = null, bVal = null;
