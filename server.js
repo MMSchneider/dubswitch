@@ -34,6 +34,7 @@ const WebSocket = require('ws');
 const osc = require('osc');
 
 const app = express();
+const fs = require('fs');
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
@@ -91,6 +92,15 @@ oscPort.on('ready', () => {
 const channelNames = {};
 // Server-side cache of per-channel user patch values (updated when CLP replies arrive)
 const userPatches = {};
+
+// Persisted matrix mapping (per-channel A/B) stored on disk
+const MATRIX_PATH = path.join(__dirname, 'matrix.json');
+let persistedMatrix = {};
+try {
+  if (fs.existsSync(MATRIX_PATH)) {
+    persistedMatrix = JSON.parse(fs.readFileSync(MATRIX_PATH, 'utf8') || '{}') || {};
+  }
+} catch (e) { console.warn('Failed to read existing matrix.json:', e && e.message); persistedMatrix = {}; }
 
 oscPort.on('message', (msg, timeTag, info) => {
   // discovery replies
@@ -193,6 +203,27 @@ app.get('/enumerate-sources', async (req, res) => {
   } catch (e) {
     return res.status(500).json({ error: String(e && e.message) });
   }
+});
+
+// Accept POST body payloads (JSON) for setting per-channel matrix entries.
+app.use(express.json({ limit: '100kb' }));
+
+// Save per-channel mapping: { channel: { aAction: 'LocalIns'|'DAW'|..., aValue: 12 }, ... }
+app.post('/set-channel-matrix', (req, res) => {
+  try {
+    const body = req.body || {};
+    // Validate input is an object keyed by channel (01..32)
+    const entries = Object.keys(body).filter(k => /^\d{2}$/.test(k));
+    if (entries.length === 0) return res.status(400).json({ error: 'no channel entries' });
+    for (const ch of entries) {
+      persistedMatrix[ch] = body[ch];
+    }
+    // Persist to disk
+    try { fs.writeFileSync(MATRIX_PATH, JSON.stringify(persistedMatrix, null, 2), 'utf8'); } catch (e) { console.warn('Failed to write matrix.json', e && e.message); }
+    // Broadcast to connected WebSocket clients to refresh their UIs
+    wss.clients.forEach(ws => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'matrix_update', matrix: persistedMatrix })); });
+    return res.json({ ok: true, matrix: persistedMatrix });
+  } catch (e) { return res.status(500).json({ error: String(e && e.message) }); }
 });
 
 oscPort.on('error', err => console.error('UDP OSC Error:', err && err.message));
@@ -311,6 +342,11 @@ app.get('/autodiscover-x32', (req, res) => {
     }
     if (Date.now() > deadline) { clearInterval(interval); return res.json({ ip: X32_IP || null }); }
   }, 200);
+});
+
+// Return persisted matrix if any
+app.get('/get-matrix', (req, res) => {
+  return res.json({ matrix: persistedMatrix || {} });
 });
 
 // Start HTTP server
