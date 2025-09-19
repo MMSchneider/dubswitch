@@ -1,0 +1,194 @@
+{
+  "blocks": [
+    {
+      "id": 0,
+      "toggleAction": "LocalIns",
+      "switchAllAction": "DAW",
+      "param": null,
+      "overrides": {}
+    },
+    {
+      "id": 1,
+      "toggleAction": "LocalIns",
+      "switchAllAction": "DAW",
+      "param": null,
+      "overrides": {}
+    },
+    {
+      "id": 2,
+      "toggleAction": "LocalIns",
+      "switchAllAction": "DAW",
+      "param": null,
+      "overrides": {}
+    },
+    {
+      "id": 3,
+      "toggleAction": "LocalIns",
+      "switchAllAction": "DAW",
+      "param": null,
+      "overrides": {}
+    }
+  ],
+  "channelMap": {
+    "10": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "11": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "12": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "13": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "14": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "15": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "16": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "17": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "18": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "19": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "20": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "21": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "22": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "23": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "24": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "25": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "26": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "27": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "28": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "29": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "30": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "31": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "32": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "01": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "02": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "03": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "04": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "05": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "06": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "07": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "08": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    },
+    "09": {
+      "aAction": "LocalIns",
+      "bAction": "DAW",
+      "param": null
+    }
+  }
+}

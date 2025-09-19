@@ -53,7 +53,7 @@
   .channel-card .btn-icon-only{background:transparent;border:1px solid rgba(255,255,255,0.06);color:rgba(255,255,255,0.7);box-shadow:none}
   .channel-card .btn-icon-only:hover{background:rgba(255,255,255,0.03);color:rgba(255,255,255,0.95)}
   /* Slightly pull the icon inwards so it's not so exposed */
-  .channel-card .btn-icon-only{transform:translateY(-4px);} 
+  .channel-card .btn-icon-only{transform:translateY(-4px);}
   .channel-card .btn-icon-only:focus{outline:2px solid rgba(96,165,250,0.35);outline-offset:2px}
   /* Ensure inner content doesn't overflow the card when blue (DAW) color is set */
   .channel-card .channel-btn{width:100%;height:100%;box-sizing:border-box;display:flex;flex-direction:column;justify-content:flex-end;padding:12px 10px 14px}
@@ -72,7 +72,6 @@
     #toast-container{position:fixed;right:16px;bottom:16px;z-index:20000}
     .dubswitch-toast{background:rgba(0,0,0,0.8);color:#e6eef3;padding:10px 14px;margin-top:8px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.5);opacity:0;transition:opacity 180ms ease,transform 220ms ease;transform:translateY(6px)}
     .dubswitch-toast.show{opacity:1;transform:translateY(0)}
-    /* small spinner for toggle button (if used) */
     .btn-spinner{display:inline-block;width:14px;height:14px;border:2px solid rgba(255,255,255,0.2);border-top-color:#fff;border-radius:50%;animation:spin .9s linear infinite;margin-left:8px;vertical-align:middle}
     @keyframes spin{to{transform:rotate(360deg)}}
   </style>
@@ -158,6 +157,16 @@
                   </div>
                   <div class="small-muted">Define what toggle buttons do</div>
                 </div>
+                <!--
+                  Matrix tab
+                  - #matrix-table-container: where the JS will render the block-level
+                    editor and the per-channel A/B table.
+                  - #matrix-autosave: checkbox (when checked the client will
+                    send a 'set_matrix' with an inferred matrix on startup).
+                  - #matrix-allow-local-toggle: when set, the client will not
+                    disable channel toggles when a block is currently using
+                    LocalIns (useful for advanced workflows).
+                -->
                 <div id="matrix-explainer" class="small-muted" style="margin-bottom:8px">Each block's toggle action and the global switch action can be set. Changes persist on the server.</div>
                 <div id="matrix-table-container"></div>
                 <div style="display:flex;align-items:center;gap:16px;margin-top:10px">

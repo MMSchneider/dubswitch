@@ -1,3 +1,19 @@
+/*
+  main.js
+  -------
+  Electron launcher used when packaging the app as a desktop application.
+
+  Responsibilities
+  - Start the local Express server (server.js) unless it's already running.
+  - Wait for the server's /version endpoint to be available before creating
+    the Electron BrowserWindow (packaged app startup flow).
+  - Create the application window and load either the local server URL
+    (development mode) or the packaged index.html (production).
+
+  The file intentionally keeps the Electron integration minimal — the
+  server remains the central authority for device communication and
+  persistence.
+*/
 const SERVER_PORT = process.env.PORT || 3000;
 const { app, BrowserWindow } = require('electron');
 const path = require('path');

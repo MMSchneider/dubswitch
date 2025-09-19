@@ -1,0 +1,10 @@
+AES50A 33-80 (48 Channels)
+AES50B 81-128 (48 Chanels)
+
+Start Server
+# from the project root
+nohup node server.js > server.log 2>&1 & echo $! > server.pid
+
+Stop Server
+
+kill "$(cat server.pid)" && rm server.pid

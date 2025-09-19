@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>X32 Input & User-Patch Router</title>
+  <!-- Bootstrap CSS -->
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/css/bootstrap.min.css"
+  >
+  <style>
+    body {
+      font-family: sans-serif;
+      background: #000;
+      color: #eee;
+      padding: 2em;
+    }
+    h1,h2 { margin: 0 0 0.5em; }
+    #status { margin-bottom: 1em; font-size: 1.1em; }
+
+    .card-section {
+      background: #111;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 20px;
+    }
+    .card-section header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+    .btn-group button {
+      margin-left: 8px;
+    }
+    .btn-group button:hover { background: #333; }
+
+    /* User-Patch grid: 4 rows × 8 columns */
+    #userpatch-container {
+      display: grid;
+      grid-template-columns: repeat(8, 1fr);
+      gap: 8px;
+    }
+    .channel-card {
+      position: relative;
+      background: transparent;
+      border: none;
+      padding: 0;
+      cursor: pointer;
+    }
+    .led-top {
+      width: 100%;
+      height: 10px;
+      background: #333;         /* off */
+      border-radius: 8px 8px 0 0;
+    }
+    .channel-btn {
+      background-color: transparent;
+      padding: 0;
+      border-radius: 0 0 8px 8px;
+      box-shadow:
+        inset 0 2px 4px rgba(0,0,0,0.5),
+        0 2px 4px rgba(0,0,0,0.7);
+      transition: transform .1s, box-shadow .1s;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .channel-btn:hover {
+      transform: translateY(-2px);
+      box-shadow:
+        inset 0 2px 4px rgba(0,0,0,0.6),
+        0 4px 8px rgba(0,0,0,0.9);
+    }
+    .up-text-wrap {
+      background: rgba(0,0,0,0.6);
+      border-radius: 6px;
+      padding: 4px 6px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      min-height: 3.6em; /* enough for two lines */
+      width: 100%;
+      box-sizing: border-box;
+    }
+    .up-num {
+      font-size: 1.1em;
+      font-weight: bold;
+      color: #fff;
+      line-height: 1.2em;
+    }
+    .up-name {
+      font-size: 0.85em;
+      color: #ddd;
+      line-height: 1.2em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      min-height: 1.2em;
+    }
+
+    /* Routing table */
+    #routing-table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    #routing-table th,
+    #routing-table td {
+      padding: 6px 12px;
+      font-size: 1em;
+      text-align: left;
+    }
+    #routing-table th {
+      color: #adff2f;
+      border-bottom: 1px solid #555;
+    }
+    #routing-table td.userin  { color: #39e639; }
+    #routing-table td.localin { color: #ff5c5c; }
+    #routing-table td.other   { color: #ccc; }
+
+    /* Switch all Inputs */
+    #toggle-inputs {
+      padding: 8px 16px;
+      font-size: 1em;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.7);
+      transition: background .2s;
+    }
+    #toggle-inputs.local { background: #e63946; color: #fff; }
+    #toggle-inputs.user  { background: #2a9d8f; color: #fff; }
+
+    /* CLP panel */
+    #clp form {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+      margin-bottom: 8px;
+    }
+    #clp input {
+      background: #222;
+      color: #fff;
+      border: 1px solid #555;
+      padding: 6px;
+      border-radius: 4px;
+      font-size: 0.9em;
+      flex: 1;
+    }
+    #clp button {
+      padding: 6px 12px;
+      background: #222;
+      border: 1px solid #444;
+      color: #fff;
+      border-radius: 4px;
+      cursor: pointer;
+    }
+    #clp button:hover { background: #333; }
+    #clp-log {
+      background: #222;
+      color: #adff2f;
+      padding: 8px;
+      font-family: monospace;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    /* Header */
+    #main-header {
+      background: #222;
+      color: #eee;
+      padding: 18px 0 10px 0;
+      margin-bottom: 24px;
+      border-radius: 8px;
+      text-align: center;
+    }
+    #main-header h1 {
+      font-size: 2em;
+      margin: 0;
+      font-weight: 600;
+      letter-spacing: 1px;
+    }
+  </style>
+</head>
+<body>
+  <!-- Settings button now inside header -->
+  <!-- Settings Modal -->
+  <div class="modal fade" id="settingsModal" tabindex="-1" role="dialog" aria-labelledby="settingsModalLabel" aria-hidden="true">
+    <div class="modal-dialog" role="document">
+      <div class="modal-content bg-dark text-light">
+        <div class="modal-header">
+          <h5 class="modal-title" id="settingsModalLabel">Settings</h5>
+          <button type="button" class="close text-light" data-dismiss="modal" aria-label="Close">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label for="x32IpInput">X32 IP Address</label>
+            <input type="text" class="form-control" id="x32IpInput" placeholder="e.g. 192.168.1.100">
+            <small class="form-text text-muted">Set manually if autodiscovery fails.</small>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-info" id="autodiscoverBtn">Autodetect</button>
+          <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+          <button type="button" class="btn btn-primary" id="saveIpBtn">Save</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <header id="main-header" style="background:#222; color:#eee; padding:18px 0 10px 0; margin-bottom:24px; border-radius:8px; text-align:center;">
+  <div style="display:flex; align-items:center; justify-content:space-between; gap:32px; padding:0 32px;">
+      <h1 style="font-size:2em; margin:0; font-weight:600; letter-spacing:1px;">X32 Channel & User-Patch Router</h1>
+      <div style="display:flex; align-items:center; gap:12px;">
+        <small id="header-version" style="color:#ddd;">&nbsp;</small>
+        <button id="settingsBtn" class="btn btn-warning btn-lg" style="margin:0;">Settings</button>
+      </div>
+    </div>
+  </header>
+
+  <div id="status">
+    Status: <span style="color: yellow;">Connecting...</span>
+  </div>
+
+  <!-- User-Patch Card -->
+  <div class="card-section">
+    <header>
+      <h2>User-Patch In 1…32</h2>
+      <div class="btn-group">
+        <button onclick="refreshUserPatches()">Refresh</button>
+        <button onclick="setAllUserPatchesLocal()">All Local</button>
+  <button onclick="setAllUserPatchesCard()">All DAW</button>
+      </div>
+    </header>
+    <div id="userpatch-container"></div>
+  </div>
+
+  <!-- Routing Card -->
+  <div class="card-section" id="routing-panel">
+    <header style="display:flex;align-items:center;gap:10px;justify-content:flex-start;">
+      <span id="routing-chevron" style="cursor:pointer;font-size:1.2em;" onclick="togglePanel('routing')">▶️</span>
+      <h2 style="margin:0;text-align:left;">Input Routing</h2>
+    </header>
+    <div id="routing-content" style="display:none;">
+      <div style="background:#222;padding:10px;border-radius:6px;margin-bottom:12px;color:#adff2f;font-size:0.98em;">
+        To use this tool, make sure all inputs are switched to <b>User Inputs</b> on the X32 Console.<br>
+        Click the <b>Switch all Inputs</b> button below. When active, the table will show <b>UserIns</b> and all blocks will be green.
+      </div>
+      <button
+        id="toggle-inputs"
+        onclick="toggleAllInputs()"
+        disabled
+        style="margin-bottom:12px;"
+      >Switch all Inputs</button>
+      <table id="routing-table"></table>
+    </div>
+  </div>
+
+  <!-- CLP Card -->
+  <div class="card-section" id="clp-panel">
+    <header style="display:flex;align-items:center;gap:10px;justify-content:flex-start;">
+      <span id="clp-chevron" style="cursor:pointer;font-size:1.2em;" onclick="togglePanel('clp')">▶️</span>
+      <h2 style="margin:0;text-align:left;">OSC Command Panel</h2>
+    </header>
+    <div id="clp-content" style="display:none;">
+      <div id="clp">
+        <form onsubmit="event.preventDefault(); sendCustomOSC();">
+          <input
+            id="clp-address"
+            type="text"
+            value="/xinfo"
+            placeholder="OSC Address"
+          >
+          <input
+            id="clp-args"
+            type="text"
+            placeholder='Args, e.g. 7, 3.14, "foo"'
+          >
+          <button type="submit">Send</button>
+        </form>
+        <div id="clp-log"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- User Inputs Warning Dialog -->
+  <div id="userin-warning" style="display:none;background:#330; color:#fff; border:2px solid #a00; border-radius:8px; padding:18px; margin-bottom:24px; text-align:center; position:fixed; top:20%; left:50%; transform:translateX(-50%); z-index:9999; max-width:400px;">
+    <h3 style="color:#ff5c5c;">Input Routing Error</h3>
+    <p>All input blocks must be set to <b>User Inputs</b> for this app to work.<br>Switch all inputs to UserIns using the button below or manually on the X32.</p>
+    <p style="color:#ffd700; font-size:0.98em; margin-top:10px;">Warning: Switching all inputs to UserIns may overwrite existing routing settings on your X32 mixer.</p>
+    <button id="switch-to-userins" style="background:#2a9d8f;color:#fff;padding:10px 24px;border:none;border-radius:6px;margin:10px 0;font-size:1.1em;">Switch All Inputs to UserIns</button>
+  </div>
+
+  <!-- Connection Warning Dialog -->
+  <div id="connect-warning" style="display:none;background:#222; color:#fff; border:2px solid #adff2f; border-radius:8px; padding:18px; margin-bottom:24px; text-align:center; position:fixed; top:20%; left:50%; transform:translateX(-50%); z-index:9999; max-width:400px;">
+    <h3 style="color:#adff2f;">Waiting for X32 Connection…</h3>
+    <p>Please wait while the app connects to your X32 mixer.<br>This may take a few seconds.</p>
+  <button id="manualIpBtn" class="btn btn-warning mt-2" type="button" style="opacity:1;pointer-events:auto;">Enter IP Manually</button>
+  </div>
+
+  <footer class="footer mt-5 py-3 bg-dark text-light text-center" style="border-top:1px solid #333;">
+    <div>
+      <strong>Developer:</strong> Mike Schneider (<a href="https://dubmajor.de" target="_blank" style="color:#9cf;">dubmajor.de</a>)<br>
+      <span>&copy; 2025 Mike Schneider. All rights reserved.</span><br>
+      <span id="app-version"></span>
+    </div>
+  </footer>
+  <!-- jQuery (required for Bootstrap JS and $ usage) -->
+  <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+  <!-- Bootstrap JS -->
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
