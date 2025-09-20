@@ -1,4 +1,9 @@
-# X32 Channel & User-Patch Router
+# Dubswitch - X32 Channel & User-Patch Router
+
+<p align="center">
+  <img src="docs/images/mainWindowV001.png" alt="DubSwitch Main Window" width="600">
+</p>
+
 
 DubSwitch is a lightweight cross-platform Electron application for routing inputs and user-patches on Behringer X32 / M32 consoles. It provides an easy-to-use web UI and OSC interface to map channels, switch patches, and manage routing rules from your desktop. The packaging ensures the app works offline (vendored CSS, embedded resources), and includes tools for creating distributable ZIPs / installers for macOS, Windows and Linux.
 
