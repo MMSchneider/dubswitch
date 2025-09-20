@@ -6,6 +6,21 @@
   <title>DubSwitch — Modern Theme</title>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/css/bootstrap.min.css">
+  <!-- Local vendor fallback so packaged app doesn't rely on CDN -->
+  <link rel="stylesheet" href="vendor/bootstrap.min.css">
+  <!-- Local fallback for button basics when CDN cannot be loaded (packaged/offline) -->
+  <style>
+    /* Minimal button fallbacks that mirror essential Bootstrap look so
+       controls remain visible inside a packaged app without network. */
+    .btn{display:inline-flex;align-items:center;justify-content:center;gap:.5rem;padding:.375rem .75rem;border-radius:.25rem;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit;cursor:pointer}
+    .btn:hover{opacity:0.95}
+    .btn-square{padding-left:.8rem;padding-right:.8rem}
+    .btn-icon-only{width:40px;height:40px;padding:0;min-width:40px;border-radius:.5rem;display:inline-flex;align-items:center;justify-content:center}
+    .btn-danger{background:#c53030;color:#fff}
+    .btn-success{background:#2f855a;color:#fff}
+    .btn-outline-light{border:1px solid rgba(255,255,255,0.18);color:#e6eef3;background:transparent}
+    .btn-sm{padding:.25rem .5rem;height:36px}
+  </style>
   <style>
     :root{--bg:#071722;--panel:#0e1a24;--muted:#9aa6b2;--accent:#2dd4bf;--accent2:#60a5fa;--card:#0b1220;--radius:12px}
     html,body{height:100%;margin:0;font-family:Inter,system-ui,Segoe UI,Roboto,Arial;background:linear-gradient(180deg,#04101a 0,#071722 100%);color:#e6eef3}
@@ -77,6 +92,8 @@
     @keyframes spin{to{transform:rotate(360deg)}}
     /* Improve contrast for small selects inside the Matrix table */
     #matrix-table-container select.form-control.form-control-sm{background:#0b1220;color:#e6eef3;border-color:rgba(255,255,255,0.06)}
+    /* Diagnostics pre-wrap so long lines don't overflow the modal */
+    #diagnostics-status, #diagnostics-matrix-file { white-space: pre-wrap; word-break: break-word; }
   </style>
 </head>
 <body>
@@ -180,12 +197,64 @@
     </div>
     <header class="site-header">
       <div class="brand">
-        <img src="resources/dubswitch_128.png" alt="logo" onerror="this.style.display='none'">
+        <img id="brand-logo" alt="logo" style="display:none;" />
+        <script>
+          (function(){
+            try {
+              var img = document.getElementById('brand-logo');
+              // If served over http(s), use the relative resources path (no extra probing)
+              if (location.protocol === 'http:' || location.protocol === 'https:') {
+                img.onload = function(){ img.style.display = 'inline-block'; };
+                img.onerror = function(){ replaceWithFallback(); };
+                img.src = 'resources/dubswitch_128.png';
+                return;
+              }
+
+              // Running under file:// (packaged). Derive the most likely path once and try it.
+              var p = location.pathname || '';
+              // Normalize (remove trailing filename if present)
+              var dir = p.replace(/\/[^/]*$/, '');
+              // Look for the .app bundle layout and construct a canonical path
+              var candidate = null;
+              var idx = dir.indexOf('/Contents/Resources');
+              if (idx !== -1) {
+                // Common Electron layout: /.../MyApp.app/Contents/Resources/app/... or /Contents/Resources/app
+                candidate = dir.substring(0, idx + '/Contents/Resources'.length) + '/app/resources/dubswitch_128.png';
+              } else {
+                // Fallback: try relative resources next to the running HTML
+                candidate = dir + '/resources/dubswitch_128.png';
+              }
+
+              // Only attempt a single src assignment to avoid multiple failed network logs in DevTools
+              img.onload = function(){ img.style.display = 'inline-block'; };
+              img.onerror = function(){ replaceWithFallback(); };
+              img.src = candidate;
+
+              function replaceWithFallback(){
+                try{
+                  var svg = document.createElement('div');
+                  svg.innerHTML = '<svg viewBox="0 0 48 48" width="40" height="40" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DubSwitch">' +
+                    '<rect width="48" height="48" rx="8" fill="#0b1220"/>' +
+                    '<g fill="#2dd4bf">' +
+                      '<circle cx="15" cy="24" r="6"/>' +
+                      '<rect x="24" y="14" width="12" height="20" rx="3"/>' +
+                    '</g>' +
+                    '</svg>';
+                  img.parentNode.replaceChild(svg, img);
+                }catch(e){ try{ img.style.display='none' }catch(e){} }
+              }
+            } catch (e) {
+              try{ document.getElementById('brand-logo').style.display='none' }catch(e){}
+            }
+          })();
+        </script>
         <h1>DubSwitch — X32 Router</h1>
       </div>
       <div class="header-actions">
         <div class="header-version" id="header-version">&nbsp;</div>
         <div id="status" class="small-muted">Status: Connecting...</div>
+        <div id="x32-ip-indicator" class="small-muted" style="margin-left:6px;min-width:120px;text-align:right">X32: —</div>
+        <button id="diagnosticsBtn" class="btn btn-outline-light btn-sm" title="Diagnostics">Diagnostics</button>
         <button id="settingsBtn" class="btn btn-warning btn-sm">Settings</button>
       </div>
     </header>
@@ -217,19 +286,7 @@
           <div id="userpatch-container"></div>
         </section>
 
-        <!-- Warnings / Status (moved here to appear below DubSwitches) -->
-        <section class="card" style="margin-top:12px">
-          <h5>Status</h5>
-          <div id="userin-warning" style="display:none;background:#2b0f10;color:#ffd7d7;padding:10px;border-radius:8px;margin-top:8px">
-            <strong>Input Routing Error</strong>
-            <p style="margin:8px 0 0">All inputs must be set to <b>User Inputs</b> for this app to operate correctly.</p>
-            <button id="switch-to-userins" class="btn btn-sm btn-success" style="margin-top:8px">Switch All Inputs to UserIns</button>
-          </div>
-          <div id="connect-warning" style="display:none;background:#0e1720;color:#bfe7df;padding:10px;border-radius:8px;margin-top:8px">
-            <strong>Waiting for X32 Connection…</strong>
-            <div style="margin-top:8px"><button id="manualIpBtn" class="btn btn-sm btn-warning">Enter IP Manually</button></div>
-          </div>
-        </section>
+        <!-- Status card removed (toasts preferred). Warnings are surfaced via toasts. -->
 
         <!-- OSC Command Panel and Input Routing moved into Settings modal -->
 
@@ -243,6 +300,44 @@
       <aside>
         <!-- aside now only contains other controls or space for future widgets -->
       </aside>
+    </div>
+  </div>
+
+  <!-- Diagnostics Modal -->
+  <div class="modal fade" id="diagnosticsModal" tabindex="-1" role="dialog" aria-labelledby="diagnosticsModalLabel" aria-hidden="true">
+    <div class="modal-dialog modal-lg" role="document">
+      <div class="modal-content bg-dark text-light">
+        <div class="modal-header">
+          <h5 class="modal-title" id="diagnosticsModalLabel">Diagnostics</h5>
+          <button type="button" class="close text-light" data-dismiss="modal" aria-label="Close">
+            <span aria-hidden="true">&times;</span>
+          </button>
+        </div>
+        <div class="modal-body">
+          <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+            <button id="diagnostics-refresh" class="btn btn-sm btn-primary">Refresh</button>
+            <button id="diagnostics-copy-status" class="btn btn-sm btn-outline-light">Copy Status</button>
+            <button id="diagnostics-copy-matrix" class="btn btn-sm btn-outline-light">Copy Matrix Info</button>
+            <div style="flex:1"></div>
+            <div class="small-muted">Shows server /status and matrix-file diagnostics</div>
+            <div id="diagnostics-spinner" style="margin-left:8px;display:none"><span class="btn-spinner" aria-hidden="true"></span></div>
+          </div>
+          <div style="display:flex;gap:12px">
+            <div style="flex:1">
+              <h6 style="margin-top:0">/status</h6>
+              <pre id="diagnostics-status" style="background:#071722;padding:8px;border-radius:6px;color:#cfeee8;max-height:320px;overflow:auto">Loading…</pre>
+            </div>
+            <div style="flex:1">
+              <h6 style="margin-top:0">/troubleshoot/matrix-file</h6>
+              <pre id="diagnostics-matrix-file" style="background:#071722;padding:8px;border-radius:6px;color:#cfeee8;max-height:320px;overflow:auto">Loading…</pre>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <div style="flex:1"></div>
+          <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+        </div>
+      </div>
     </div>
   </div>
 

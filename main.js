@@ -15,7 +15,8 @@
   persistence.
 */
 const SERVER_PORT = process.env.PORT || 3000;
-const { app, BrowserWindow } = require('electron');
+const { app, BrowserWindow, Menu } = require('electron');
+const fs = require('fs');
 const path = require('path');
 // Read package.json version to show in window title
 const pkg = require(path.join(__dirname, 'package.json'));
@@ -33,14 +34,19 @@ try {
 }
 
 function createWindow() {
-  const win = new BrowserWindow({
+  // Try to surface a window icon when available (helps on Windows/Linux and
+  // packaged macOS builds where an .icns is provided inside Resources)
+  const possibleIcon = path.join(__dirname, 'resources', 'dubswitch.icns');
+  const winOpts = {
     width: 1100,
     height: 800,
     webPreferences: { nodeIntegration: false },
     autoHideMenuBar: true,
     // Set a meaningful title including the app version
     title: `x32-router v${pkg.version}`
-  });
+  };
+  if (fs.existsSync(possibleIcon)) winOpts.icon = possibleIcon;
+  const win = new BrowserWindow(winOpts);
   // If running in dev mode, use local server; otherwise, load the packaged index.html
   const isDev = process.env.NODE_ENV === 'development' || process.env.ELECTRON_DEV === 'true';
   if (isDev) {
@@ -49,6 +55,67 @@ function createWindow() {
     win.loadFile(path.join(__dirname, 'public', 'index.html'));
   // DevTools are not opened in packaged app
   }
+  // Optionally open DevTools: allow forcing via ELECTRON_OPEN_DEVTOOLS=1 or ELECTRON_DEVTOOLS=true
+  try {
+    // Only auto-open DevTools when explicitly requested via env var. The
+    // application menu provides a runtime toggle instead of always opening in dev.
+    const openDev = Boolean(process.env.ELECTRON_OPEN_DEVTOOLS === '1' || process.env.ELECTRON_DEVTOOLS === 'true');
+    if (openDev && win && win.webContents) {
+      // Use detached mode so the inspector is separate from the app window
+      win.webContents.openDevTools({ mode: 'detach' });
+    }
+  } catch (e) { /* ignore */ }
+  return win;
+}
+
+// Setup the application menu including a Toggle DevTools item so users can
+// open/close DevTools at runtime. The click handler toggles the focused
+// BrowserWindow's webContents.
+function setupMenu() {
+  try {
+    const template = [];
+    // macOS: provide a proper app menu so the app name and icon appear in the
+    // global menu bar. This also makes the UI feel native.
+    if (process.platform === 'darwin') {
+      template.push({
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          { type: 'separator' },
+          { role: 'services', submenu: [] },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideothers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' }
+        ]
+      });
+    } else {
+      // Non-mac platforms: add a File menu with common actions
+      template.push({ role: 'fileMenu' });
+    }
+
+    // View menu (common) — includes the Toggle DevTools action
+    template.push({
+      label: 'View',
+      submenu: [
+        { role: 'reload' },
+        { role: 'forcereload' },
+        { type: 'separator' },
+        {
+          label: 'Toggle DevTools',
+          accelerator: 'CmdOrCtrl+Shift+I',
+          click: (menuItem, browserWindow) => {
+            const win = browserWindow || BrowserWindow.getFocusedWindow();
+            if (win && win.webContents) win.webContents.toggleDevTools();
+          }
+        }
+      ]
+    });
+    const menu = Menu.buildFromTemplate(template);
+    Menu.setApplicationMenu(menu);
+  } catch (e) { console.warn('Failed to setup application menu', e && e.message); }
 }
 
 // Wait for the local HTTP server to respond before creating the renderer window.
@@ -81,6 +148,8 @@ function waitForServer(port, opts = {}) {
 }
 
 app.whenReady().then(async () => {
+  // Install the application menu so users can toggle DevTools at runtime
+  setupMenu();
   const isDev = process.env.NODE_ENV === 'development' || process.env.ELECTRON_DEV === 'true';
   if (isDev) {
     createWindow();

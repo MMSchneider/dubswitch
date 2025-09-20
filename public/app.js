@@ -72,6 +72,28 @@ function safeSendWs(data) {
 // event handlers remain always-present to avoid ReferenceErrors.
 const IS_DEV = (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || window.__DUBSWITCH_DEV_SHIMS__ === true);
 
+// API origin helper: when running as a packaged app (file://) the renderer
+// cannot use relative URLs like '/status'. In that case default to
+// http://localhost:3000 unless an explicit origin is provided via
+// window.__DUBSWITCH_API_ORIGIN__ (useful for tests or custom launches).
+const API_ORIGIN = (function(){
+  try {
+    if (window.__DUBSWITCH_API_ORIGIN__) return String(window.__DUBSWITCH_API_ORIGIN__);
+    if (location.protocol === 'file:') return 'http://localhost:3000';
+    // normal web context: use relative paths (empty origin -> relative)
+    return '';
+  } catch (e) { return '';} 
+})();
+
+function apiUrl(path) {
+  if (!path) path = '/';
+  if (API_ORIGIN) {
+    // ensure there's a single slash between origin and path
+    return API_ORIGIN.replace(/\/$/, '') + (path.startsWith('/') ? path : ('/' + path));
+  }
+  return path;
+}
+
 // Minimal DOM element fallbacks used by various functions below. If the
 // real element exists, these will be replaced by actual nodes during
 // normal runtime (DOMContentLoaded handlers). These placeholders prevent
@@ -81,6 +103,44 @@ window.statusEl = document.getElementById('status') || _noopEl();
 window.toggleInputsBtn = document.getElementById('toggle-inputs') || _noopEl();
 window.routingTable = document.getElementById('routing-table') || _noopEl();
 window.userpatchContainer = document.getElementById('userpatch-container') || _noopEl();
+
+// Defensive runtime defaults: when running as a packaged file:// app the
+// server hasn't yet populated these globals and many UI renderers assume
+// they exist. Initialize minimal safe defaults to avoid ReferenceErrors and
+// let the WebSocket/server overwrite them when data arrives.
+window.blocks = window.blocks || [];
+window.routingState = window.routingState || [null, null, null, null];
+window.userPatches = window.userPatches || {};
+window.channelNames = window.channelNames || {};
+window.channelNamePending = window.channelNamePending || {};
+window.channelColors = window.channelColors || {};
+window.colorMap = window.colorMap || { null: 'transparent' };
+
+// Create legacy bare identifiers many older functions expect (blocks, routingState, etc.)
+// and keep them synced with the authoritative `window.*` objects. This avoids
+// ReferenceErrors in packaged/file:// contexts where code was historically
+// written to reference bare globals instead of `window.` properties.
+var blocks = window.blocks || [];
+var routingState = window.routingState || [null, null, null, null];
+var userPatches = window.userPatches || {};
+var channelNames = window.channelNames || {};
+var channelNamePending = window.channelNamePending || {};
+var channelColors = window.channelColors || {};
+var colorMap = window.colorMap || { null: 'transparent' };
+
+// Lightweight periodic sync to keep the legacy identifiers pointing at the
+// latest values if the server updates `window.*` directly.
+setInterval(() => {
+  try {
+    blocks = window.blocks || blocks;
+    routingState = window.routingState || routingState;
+    userPatches = window.userPatches || userPatches;
+    channelNames = window.channelNames || channelNames;
+    channelNamePending = window.channelNamePending || channelNamePending;
+    channelColors = window.channelColors || channelColors;
+    colorMap = window.colorMap || colorMap;
+  } catch (e) {}
+}, 400);
 
 // Simple connect-dialog helpers used throughout the app. They try to
 // manipulate the DOM when the elements exist; otherwise they are safe no-ops.
@@ -425,7 +485,7 @@ function renderStaticMatrixTable() {
         awaitingMatrixBroadcast = true;
         const payload = JSON.stringify(body);
         console.debug('[UI] Sending matrix payload', body);
-        fetch('/set-channel-matrix', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
+  fetch(apiUrl('/set-channel-matrix'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload })
           .then(async (r) => {
             if (!r.ok) {
               // try to read response body for a helpful message
@@ -494,7 +554,7 @@ window.addEventListener('DOMContentLoaded', ()=>{ renderStaticMatrixTable(); });
 window.addEventListener('DOMContentLoaded', async ()=>{
   try {
     if (!window.enumerateResults) {
-      const resp = await fetch('/enumerate-sources');
+  const resp = await fetch(apiUrl('/enumerate-sources'));
       if (resp && resp.ok) {
         const json = await resp.json();
         if (json) {
@@ -505,6 +565,94 @@ window.addEventListener('DOMContentLoaded', async ()=>{
     }
   } catch (e) { /* ignore failures silently */ }
 });
+
+// Diagnostics: fetch /status and /troubleshoot/matrix-file and display
+async function fetchDiagnostics() {
+  try {
+    const outStatus = document.getElementById('diagnostics-status');
+    const outMatrix = document.getElementById('diagnostics-matrix-file');
+    const spinner = document.getElementById('diagnostics-spinner');
+    if (spinner) spinner.style.display = '';
+    if (outStatus) outStatus.textContent = 'Loading...';
+    if (outMatrix) outMatrix.textContent = 'Loading...';
+    // Fetch both in parallel
+    const [sRes, mRes] = await Promise.allSettled([
+      fetch(apiUrl('/status')),
+      fetch(apiUrl('/troubleshoot/matrix-file'))
+    ]);
+    if (sRes.status === 'fulfilled') {
+      try {
+        const j = await sRes.value.json();
+        if (outStatus) outStatus.textContent = JSON.stringify(j, null, 2);
+      } catch (e) { if (outStatus) outStatus.textContent = 'Failed to parse /status JSON: ' + e; }
+    } else { if (outStatus) outStatus.textContent = '/status fetch failed: ' + sRes.reason; }
+
+    if (mRes.status === 'fulfilled') {
+      try {
+        const j = await mRes.value.json();
+        if (outMatrix) outMatrix.textContent = JSON.stringify(j, null, 2);
+      } catch (e) { if (outMatrix) outMatrix.textContent = 'Failed to parse /troubleshoot/matrix-file JSON: ' + e; }
+    } else { if (outMatrix) outMatrix.textContent = '/troubleshoot/matrix-file fetch failed: ' + mRes.reason; }
+    if (spinner) spinner.style.display = 'none';
+  } catch (e) {
+    console.error('fetchDiagnostics failed', e);
+    const spinner = document.getElementById('diagnostics-spinner'); if (spinner) spinner.style.display = 'none';
+  }
+}
+
+// Wire diagnostics UI actions when DOM ready
+window.addEventListener('DOMContentLoaded', ()=>{
+  try {
+    const diagBtn = document.getElementById('diagnosticsBtn');
+    const diagRefresh = document.getElementById('diagnostics-refresh');
+    const diagCopyStatus = document.getElementById('diagnostics-copy-status');
+    const diagCopyMatrix = document.getElementById('diagnostics-copy-matrix');
+
+    if (diagBtn) {
+      diagBtn.addEventListener('click', ()=>{
+        try {
+          if (window.jQuery) window.jQuery('#diagnosticsModal').modal('show');
+          fetchDiagnostics();
+          // Start auto-refresh while modal is open
+          try {
+            if (window.__diagnosticsAutoInterval) clearInterval(window.__diagnosticsAutoInterval);
+            window.__diagnosticsAutoInterval = setInterval(()=>{
+              const mod = document.getElementById('diagnosticsModal');
+              if (!mod) return; // safety
+              // only refresh when modal is visible
+              const isOpen = window.jQuery ? window.jQuery(mod).hasClass('show') : (mod.style.display !== 'none');
+              if (isOpen) fetchDiagnostics();
+              else {
+                try { clearInterval(window.__diagnosticsAutoInterval); window.__diagnosticsAutoInterval = null; }
+                catch (e) {}
+              }
+            }, 4000);
+          } catch (e) {}
+        } catch (e) { console.error(e); }
+      }, { passive: true });
+    }
+    if (diagRefresh) diagRefresh.addEventListener('click', fetchDiagnostics, { passive: true });
+    if (diagCopyStatus) diagCopyStatus.addEventListener('click', ()=>{
+      const out = document.getElementById('diagnostics-status'); if (!out) return; navigator.clipboard.writeText(out.textContent||'').then(()=> showToast('Status copied to clipboard')).catch(()=> showToast('Copy failed'));
+    }, { passive: true });
+    if (diagCopyMatrix) diagCopyMatrix.addEventListener('click', ()=>{
+      const out = document.getElementById('diagnostics-matrix-file'); if (!out) return; navigator.clipboard.writeText(out.textContent||'').then(()=> showToast('Matrix info copied')).catch(()=> showToast('Copy failed'));
+    }, { passive: true });
+  } catch (e) { console.error('diagnostics wiring failed', e); }
+});
+
+// Update header X32 IP indicator from /status periodically
+async function pollStatusForHeader() {
+  try {
+    const resp = await fetch(apiUrl('/status'));
+    if (!resp.ok) return;
+    const j = await resp.json();
+    const ipEl = document.getElementById('x32-ip-indicator');
+    if (ipEl) ipEl.textContent = 'X32: ' + (j && j.x32Ip ? j.x32Ip : '—');
+  } catch (e) {}
+}
+// Start polling header status every 5s
+try { pollStatusForHeader(); setInterval(pollStatusForHeader, 5000); } catch (e) {}
 
 // Rebind important DOM elements once the DOM is ready and render routing
 // table so it appears in the correct tab. Previously these globals were
@@ -539,9 +687,19 @@ window.addEventListener('DOMContentLoaded', ()=>{
     // Create WebSocket connection to the same origin so the client can
     // receive routing, channel_names and clp messages from the server.
     try {
-      const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-      const wsUrl = proto + '//' + location.host;
-      createWs(wsUrl);
+      // If running inside Electron/file://, API_ORIGIN will be http://localhost:PORT
+      // so derive WS URL from that origin; otherwise use same-origin WS.
+      try {
+        let wsUrl;
+        if (API_ORIGIN) {
+          const origin = API_ORIGIN.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
+          wsUrl = origin.replace(/\/$/, '');
+        } else {
+          const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+          wsUrl = proto + '//' + location.host;
+        }
+        createWs(wsUrl);
+      } catch (e) { console.warn('createWs failed', e); }
     } catch (e) { console.warn('createWs failed', e); }
 
     // UI flag: while we are awaiting per-channel CLP replies from the server
@@ -555,7 +713,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
         autodBtn.onclick = async () => {
           try {
             autodBtn.disabled = true;
-            const res = await fetch('/autodiscover-x32');
+            const res = await fetch(apiUrl('/autodiscover-x32'));
             const json = await res.json();
             if (json && json.ip) {
               const ipEl = document.getElementById('x32IpInput'); if (ipEl) ipEl.value = json.ip;
@@ -590,7 +748,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
         enumBtn.onclick = async () => {
           try {
             enumBtn.disabled = true; enumBtn.textContent = 'Enumerating…';
-            const resp = await fetch('/enumerate-sources');
+            const resp = await fetch(apiUrl('/enumerate-sources'));
             const json = await resp.json();
             // Keep a global copy so other UI pieces (matrix) can reuse results
             window.enumerateResults = json || {};
@@ -745,7 +903,7 @@ function checkUserIns() {
   const warning = document.getElementById('userin-warning');
   // If all blocks are LocalIns, show the full error and disable everything
   if (allLocal) {
-    warning.style.display = '';
+    if (warning) warning.style.display = '';
     document.querySelectorAll('.channel-btn').forEach(btn=>{
       // skip modal internals
       if (btn.closest && btn.closest('.modal')) return;
@@ -757,14 +915,13 @@ function checkUserIns() {
     toggleInputsBtn.style.opacity = 1;
     toggleInputsBtn.style.pointerEvents = '';
     statusEl.innerHTML = '<span style="color:#ff5c5c;font-weight:bold;">All inputs are LocalIns — switch at least one block to UserIns to use the app.</span>';
-    document.getElementById('switch-to-userins').disabled = false;
-    document.getElementById('switch-to-userins').style.opacity = 1;
-    document.getElementById('switch-to-userins').style.pointerEvents = '';
+    const swBtn = document.getElementById('switch-to-userins');
+    if (swBtn) { swBtn.disabled = false; swBtn.style.opacity = 1; swBtn.style.pointerEvents = ''; }
     return;
   }
 
   // Mixed state: only grey out channels that belong to blocks currently set to LocalIns
-  warning.style.display = 'none';
+  if (warning) warning.style.display = 'none';
   // compute blocked blocks indexes
   const blocked = [];
   blocks.forEach((b,i)=>{
@@ -803,20 +960,22 @@ function checkUserIns() {
 
 // Attach dialog button handlers
 window.addEventListener('DOMContentLoaded',()=>{
-  document.getElementById('switch-to-userins').onclick = ()=>{
-    safeSendWs(JSON.stringify({type:'toggle_inputs',targets:blocks.map(b=>b.userin)}));
-    setTimeout(()=>safeSendWs(JSON.stringify({type:'load_routing'})),500);
-  };
+  const sw = document.getElementById('switch-to-userins');
+  if (sw) sw.onclick = ()=>{ safeSendWs(JSON.stringify({type:'toggle_inputs',targets:blocks.map(b=>b.userin)})); setTimeout(()=>safeSendWs(JSON.stringify({type:'load_routing'})),500); };
   // 'matrix-allow-local-toggle' checkbox removed from UI; no initialization required
 });
 
 function renderRoutingTable(){
   // Build a cleaner table with badges and clear status
+  // Guard against missing runtime data when running from file:// before
+  // the server has provided blocks/routingState.
+  if (!Array.isArray(window.blocks) || window.blocks.length === 0) return;
+  if (!Array.isArray(window.routingState)) return;
   let html = `
     <thead><tr><th>Block</th><th>Current</th></tr></thead>
     <tbody>
   `;
-  blocks.forEach((b,i)=>{
+  window.blocks.forEach((b,i)=>{
     const v = Number(routingState[i]);
     let txt = '';
     let badgeClass = 'badge-secondary';
@@ -844,7 +1003,7 @@ function renderRoutingTable(){
   html += `</tbody>`;
   routingTable.innerHTML = html;
   // Wire inline block toggles — always enabled so user can flip a block back and forth
-  blocks.forEach((b,i)=>{
+  window.blocks.forEach((b,i)=>{
     const id = `blk-toggle-${i}`;
     const el = document.getElementById(id);
     if(el){
@@ -979,18 +1138,19 @@ function renderUserPatches(){
     const nn=String(ch).padStart(2,"0");
     let name = `Ch ${nn}`;
     const chKey = nn;
-    if(channelNamePending[chKey]){
+    if((window.channelNamePending||{})[chKey]){
       name = "Updating…";
-    } else if(channelNames[chKey]!==undefined && channelNames[chKey]!==null && channelNames[chKey]!=""){
-      if(typeof channelNames[chKey]==="object" && "value" in channelNames[chKey]){
-        name = String(channelNames[chKey].value).trim();
-      } else if(typeof channelNames[chKey]==="string"){
-        name = channelNames[chKey].trim();
+    } else if((window.channelNames||{})[chKey]!==undefined && (window.channelNames||{})[chKey]!==null && (window.channelNames||{})[chKey]!=""){
+      const chVal = (window.channelNames||{})[chKey];
+      if(typeof chVal==="object" && "value" in chVal){
+        name = String(chVal.value).trim();
+      } else if(typeof chVal==="string"){
+        name = chVal.trim();
       } else {
-        name = String(channelNames[chKey]).trim();
+        name = String(chVal).trim();
       }
     }
-    const uVal=userPatches[ch]||ch;
+  const uVal=(window.userPatches && window.userPatches[ch])||ch;
     // Always show a friendly, pretty label for the current source value
     let patchTypeText = 'Unknown';
     try {
@@ -1018,7 +1178,7 @@ function renderUserPatches(){
     const nn=String(ch).padStart(2,"0");
     const btn = document.getElementById(`btn-${nn}`);
     const card= document.getElementById(`card-${nn}`);
-    const cVal=channelColors[ch];
+  const cVal=(window.channelColors&&window.channelColors[ch]);
     const uVal=userPatches[ch]||ch;
     if(uVal>=1&&uVal<=32){
       btn.style.backgroundColor = "#222"; // dark grey for Local

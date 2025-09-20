@@ -88,6 +88,9 @@ oscPort.on('ready', () => {
   try { sendOsc({ address: '/xinfo', args: [] }, BROADCAST_ADDR); } catch (e) { /* ignore */ }
 });
 
+// Diagnostics counters
+let pingCount = 0;
+
 // Channel name cache
 const channelNames = {};
 // Server-side cache of per-channel user patch values (updated when CLP replies arrive)
@@ -105,6 +108,7 @@ try {
 oscPort.on('message', (msg, timeTag, info) => {
   // discovery replies
   if (msg.address === '/xinfo') {
+    pingCount++;
     if (!X32_IP) updateX32Ip(info.address, 'initial-discovery');
     else if (X32_IP !== info.address) updateX32Ip(info.address, 'discovery-reply');
     else console.log('Ping OK from', info.address);
@@ -220,29 +224,35 @@ app.post('/set-channel-matrix', (req, res) => {
     }
     // Persist to disk atomically (write to temp then rename) and reload
     try {
-      const tmp = MATRIX_PATH + '.tmp';
-      fs.writeFileSync(tmp, JSON.stringify(persistedMatrix, null, 2), 'utf8');
-      fs.renameSync(tmp, MATRIX_PATH);
-      try {
-        // Reload canonical matrix from disk to ensure we return what was actually written
-        const raw = fs.readFileSync(MATRIX_PATH, 'utf8') || '{}';
-        persistedMatrix = JSON.parse(raw) || persistedMatrix;
-      } catch (e) {
-        console.warn('Failed to reload matrix.json after write:', e && e.message);
-      }
-    } catch (e) {
-      // Enhanced error logging to aid debugging when clients report save failures
-      try {
-        const errDetails = { message: (e && e.message) || String(e), stack: (e && e.stack) || null };
-        console.error('Failed to write matrix.json atomically:', errDetails);
-        // Attempt a fallback write directly (non-atomic) and log outcome
+        const tmp = MATRIX_PATH + '.tmp';
+        fs.writeFileSync(tmp, JSON.stringify(persistedMatrix, null, 2), 'utf8');
+        fs.renameSync(tmp, MATRIX_PATH);
         try {
-          fs.writeFileSync(MATRIX_PATH, JSON.stringify(persistedMatrix, null, 2), 'utf8');
-          console.warn('Fallback: wrote matrix.json directly (non-atomic) after atomic write failed');
-        } catch (e2) {
-          console.error('Fallback write also failed:', e2 && e2.message);
+          // Reload canonical matrix from disk to ensure we return what was actually written
+          const raw = fs.readFileSync(MATRIX_PATH, 'utf8') || '{}';
+          persistedMatrix = JSON.parse(raw) || persistedMatrix;
+        } catch (e) {
+          console.warn('Failed to reload matrix.json after write:', e && e.message);
         }
-      } catch (inner) { console.error('Error while logging matrix.json write failure', inner && inner.message); }
+      } catch (e) {
+        // Enhanced error logging to aid debugging when clients report save failures
+        try {
+          const errDetails = { message: (e && e.message) || String(e), stack: (e && e.stack) || null };
+          console.error('Failed to write matrix.json atomically:', errDetails);
+          // Log the incoming payload for diagnosis
+          try { console.error('Incoming payload that failed to persist:', JSON.stringify(body)); } catch (ee) { console.error('Failed to stringify incoming payload'); }
+          // Attempt a fallback write directly (non-atomic) and log outcome
+          try {
+            fs.writeFileSync(MATRIX_PATH, JSON.stringify(persistedMatrix, null, 2), 'utf8');
+            console.warn('Fallback: wrote matrix.json directly (non-atomic) after atomic write failed');
+            // Return success but include a warning so clients can surface a non-critical message
+            return res.json({ ok: true, matrix: persistedMatrix, warning: 'atomic write failed, fallback write used. Check server logs for details.' });
+          } catch (e2) {
+            console.error('Fallback write also failed:', e2 && e2.message);
+            // Return 500 to the client with a helpful message
+            return res.status(500).json({ ok: false, error: 'atomic write failed and fallback write also failed: ' + (e2 && e2.message) });
+          }
+        } catch (inner) { console.error('Error while logging matrix.json write failure', inner && inner.message); }
     }
     // Broadcast to connected WebSocket clients to refresh their UIs
     wss.clients.forEach(ws => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'matrix_update', matrix: persistedMatrix })); });
@@ -401,12 +411,34 @@ app.get('/autodiscover-x32', (req, res) => {
   }, 200);
 });
 
+// Quick status endpoint for diagnostics (X32 IP, WS clients, ping counters)
+app.get('/status', (req, res) => {
+  try {
+    const clients = Array.from(wss.clients || []).filter(c => c && c.readyState === WebSocket.OPEN).length;
+    const ifaces = os.networkInterfaces();
+    return res.json({ ok: true, x32Ip: X32_IP || null, wsClients: clients, pingCount, ifaces });
+  } catch (e) { return res.status(500).json({ ok: false, error: e && e.message }); }
+});
+
 // Return persisted matrix if any
 app.get('/get-matrix', (req, res) => {
   return res.json({ matrix: persistedMatrix || {} });
 });
 
-// Start HTTP server
-server.listen(3000, '0.0.0.0', () => console.log('Web UI listening on http://localhost:3000'));
+// Start HTTP server (configurable via PORT env var)
+const PORT = Number(process.env.PORT) || 3000;
+
+server.on('error', (err) => {
+  if (err && err.code === 'EADDRINUSE') {
+    console.error(`EADDRINUSE: port ${PORT} already in use. Another process is bound to this port.`);
+    console.error(`Tip: run \`lsof -nP -iTCP:${PORT} -sTCP:LISTEN\` to find the process, or start with a different port: \`PORT=4000 npm run server\`.`);
+    // Exit with non-zero code so process managers know the start failed
+    process.exit(1);
+  }
+  console.error('HTTP server error:', err && err.message);
+  process.exit(1);
+});
+
+server.listen(PORT, '0.0.0.0', () => console.log(`Web UI listening on http://localhost:${PORT}`));
 
 module.exports = { app, server };
