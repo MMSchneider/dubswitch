@@ -2,7 +2,7 @@
 
 DubSwitch is a lightweight cross-platform Electron application for routing inputs and user-patches on Behringer X32 / M32 consoles. It provides an easy-to-use web UI and OSC interface to map channels, switch patches, and manage routing rules from your desktop. The packaging ensures the app works offline (vendored CSS, embedded resources), and includes tools for creating distributable ZIPs / installers for macOS, Windows and Linux.
 
-First release for Mac (M2) — by Mike Schneider ([dubmajor.de](https://dubmajor.de))
+First release — by Mike Schneider ([dubmajor.de](https://dubmajor.de))
 
 ## Features
 - Electron/Node.js app for X32 input routing and OSC command panel
