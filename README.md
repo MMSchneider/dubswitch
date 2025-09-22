@@ -1,3 +1,4 @@
+# dubswitch — X32 Channel & User-Patch Router
 # Dubswitch - X32 Channel & User-Patch Router
 
 <p align="center">
@@ -9,20 +10,26 @@ DubSwitch is a lightweight cross-platform Electron application for routing input
 
 First release — by Mike Schneider ([dubmajor.de](https://dubmajor.de))
 
+Dubswitch is a lightweight cross-platform Electron application for routing inputs and user-patches on Behringer X32 / M32 consoles. It provides an easy-to-use web UI and an OSC interface to map channels, switch patches, and manage routing rules from your desktop.
+
+The project includes helper scripts and a packaging flow that produces ZIP archives and platform installers. For convenience the UI ships with vendored Bootstrap and jQuery so it can run offline without external CDN dependencies.
+
 ## Features
 - Electron/Node.js app for X32 input routing and OSC command panel
 - Editable channel names, color feedback, collapsible panels
 - Versioning and release info displayed in footer
 - Connection and routing state dialogs for user guidance
 
--## Installation & Build Instructions
+## Installation & Build
+
+Quick start for development:
 
 If you want to compile the project yourself:
 
 1. **Clone the repository:**
-	```sh
-	git clone https://github.com/MMSchneider/x32-router.git
-	cd x32-router
+	```bash
+	git clone https://github.com/MMSchneider/dubswitch.git
+	cd dubswitch
 	```
 2. **Install dependencies:**
 	```sh
@@ -32,28 +39,33 @@ If you want to compile the project yourself:
 	```sh
 	npm start
 	```
-4. **Build a standalone app (macOS example):**
-	```sh
-	npm run package-mac
-	```
-	The packaged app will be in the `x32-router-darwin-x64/` folder.
+Packaging
+
+- There are convenience npm scripts to package the app for different platforms (see `package.json`).
+- The repo also contains `createRelease.sh`, a helper script that runs the packager and creates ZIP artifacts under `dist-release-*`.
+- Note: On macOS the script intentionally skips Debian (.deb) creation if the host lacks `fakeroot` / `dpkg-deb`. Create .deb packages on Linux or inside a container/CI instead.
 
 For other platforms, adjust the packaging command as needed (see package.json scripts).
 
 ## Versioning
-- Version is managed in `package.json` and displayed in the app footer
-- Tag releases in git for each published version (e.g. `v1.0.0`)
-- Work on new features in separate branches (e.g. `next-version`)
+
+- Version is managed in `package.json` and displayed in the app footer.
+- Tag releases in git for each published version (e.g. `v0.1.0`).
+- Work on new features in separate branches and open pull requests for review.
 
 ## Development Workflow
-1. Commit changes to `main` for stable releases
-2. Create feature branches for new work: `git checkout -b next-version`
-3. Use `.gitignore` and `.vscode/settings.json` to keep repo clean
-4. Tag releases: `git tag v1.0.0 && git push --tags`
+## Development workflow
+
+1. Create feature branches for new work: `git checkout -b my-feature`
+2. Open a pull request and merge into `main` for releases.
+3. Use `.gitignore` and `.vscode/settings.json` to keep repo clean.
+4. Tag releases: `git tag v0.1.0 && git push --tags`.
 
 ## Publishing
-- Push to your GitHub repo (e.g. `github.com/dubmajor/x32-router`)
-- Update README and version for each release
+Publishing
+
+- Push to your GitHub repository (e.g. `github.com/MMSchneider/dubswitch`).
+- Update `package.json`'s `version` and create a matching git tag when publishing a release.
 
 ---
 © 2025 Mike Schneider. All rights reserved.
