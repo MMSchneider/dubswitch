@@ -35,8 +35,9 @@ const osc = require('osc');
 
 const app = express();
 const fs = require('fs');
-const server = http.createServer(app);
-const wss = new WebSocket.Server({ server });
+// server and wss are created by startServer so we can rebind at runtime
+let server = null;
+let wss = null;
 
 // Serve static UI
 app.use(express.static(path.join(__dirname, 'public')));
@@ -69,10 +70,10 @@ const BROADCAST_ADDR = getBroadcastAddress();
 
 // Routing block descriptors (OSC address + representative values)
 const routingBlocks = [
-  { osc: '/config/routing/IN/1-8', userin: 20, localin: 0 },
-  { osc: '/config/routing/IN/9-16', userin: 21, localin: 1 },
-  { osc: '/config/routing/IN/17-24', userin: 22, localin: 2 },
-  { osc: '/config/routing/IN/25-32', userin: 23, localin: 3 }
+  { label: '1-8', osc: '/config/routing/IN/1-8', userin: 20, localin: 0 },
+  { label: '9-16', osc: '/config/routing/IN/9-16', userin: 21, localin: 1 },
+  { label: '17-24', osc: '/config/routing/IN/17-24', userin: 22, localin: 2 },
+  { label: '25-32', osc: '/config/routing/IN/25-32', userin: 23, localin: 3 }
 ];
 
 let currentRoutingState = [null, null, null, null];
@@ -105,7 +106,27 @@ try {
   }
 } catch (e) { console.warn('Failed to read existing matrix.json:', e && e.message); persistedMatrix = {}; }
 
+// Persisted HTTP port file (simple text file containing port number)
+const PORT_PERSIST_PATH = path.join(__dirname, 'server.port');
+let persistedPort = null;
+try {
+  if (fs.existsSync(PORT_PERSIST_PATH)) {
+    const txt = fs.readFileSync(PORT_PERSIST_PATH, 'utf8').trim();
+    const n = Number(txt || '');
+    if (n && n > 0 && n <= 65535) persistedPort = n;
+  }
+} catch (e) { /* ignore */ }
+
+// Track the currently-bound HTTP port (updated when server listens)
+let CURRENT_PORT = null;
+
 oscPort.on('message', (msg, timeTag, info) => {
+  try {
+    // Debug: log routing-related incoming messages so we can inspect replies
+    if (msg && msg.address && String(msg.address).includes('/config/routing/IN')) {
+      try { console.log('[OSC IN] ->', info && info.address, msg.address, JSON.stringify(msg.args || [])); } catch (e) { console.log('[OSC IN] (err)'); }
+    }
+  } catch (e) {}
   // discovery replies
   if (msg.address === '/xinfo') {
     pingCount++;
@@ -126,7 +147,9 @@ oscPort.on('message', (msg, timeTag, info) => {
         if (req.replies === routingBlocks.length) {
           clearTimeout(req.timeout);
           currentRoutingState = req.values.slice();
-          req.ws.send(JSON.stringify({ type: 'routing', values: req.values }));
+          try { req.ws.send(JSON.stringify({ type: 'routing', values: req.values })); } catch (e) {}
+          // Broadcast to all connected clients to ensure everyone observes the new state
+          try { if (wss && wss.clients) wss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(JSON.stringify({ type: 'routing', values: req.values })); }); } catch (e) {}
           delete routingRequests[reqId];
         }
       }
@@ -316,75 +339,121 @@ function sendOsc(msg, host) {
 
 function readAllRouting(ws) {
   const reqId = routingRequestId++;
+  console.log('[ROUTING] start req', reqId);
   routingRequests[reqId] = { ws, values: Array(routingBlocks.length).fill(null), got: Array(routingBlocks.length).fill(false), replies: 0, timeout: setTimeout(() => {
-    const req = routingRequests[reqId]; if (req) { currentRoutingState = req.values.slice(); req.ws.send(JSON.stringify({ type: 'routing', values: req.values })); delete routingRequests[reqId]; }
+    const req = routingRequests[reqId];
+      if (req) {
+      currentRoutingState = req.values.slice();
+      try { req.ws.send(JSON.stringify({ type: 'routing', values: req.values })); console.log('[ROUTING] timeout send req', reqId, 'values', req.values); } catch (e) { console.error('[ROUTING] timeout send failed', e && e.message); }
+      try { if (wss && wss.clients) wss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) c.send(JSON.stringify({ type: 'routing', values: req.values })); }); } catch (e) {}
+      delete routingRequests[reqId];
+    }
   }, 2000) };
   routingBlocks.forEach(block => { try { sendOsc({ address: block.osc, args: [] }, X32_IP); } catch (e) {} });
 }
 
-wss.on('connection', ws => {
-  console.log('WebSocket client connected');
-  try { sendOsc({ address: '/xinfo', args: [] }, X32_IP); } catch (e) {}
+function setupWebsocketHandlers(currentWss) {
+  currentWss.on('connection', ws => {
+    console.log('WebSocket client connected');
+    try { sendOsc({ address: '/xinfo', args: [] }, X32_IP); } catch (e) {}
+  // Send routing block descriptors to client so UI knows userin/localin codes
+  try { ws.send(JSON.stringify({ type: 'blocks', blocks: routingBlocks })); } catch (e) {}
   readAllRouting(ws);
-  for (let ch = 1; ch <= 32; ch++) {
-    const nn = String(ch).padStart(2, '0');
-    try { sendOsc({ address: `/config/userrout/in/${nn}`, args: [] }, X32_IP); } catch (e) {}
-    try { sendOsc({ address: `/ch/${nn}/config/name`, args: [] }, X32_IP); } catch (e) {}
-    try { sendOsc({ address: `/ch/${nn}/config/color`, args: [] }, X32_IP); } catch (e) {}
-  }
-  ws.send(JSON.stringify({ type: 'channel_names', names: channelNames }));
-  if (currentRoutingState && currentRoutingState.some(v => v !== null)) ws.send(JSON.stringify({ type: 'routing', values: currentRoutingState }));
+    for (let ch = 1; ch <= 32; ch++) {
+      const nn = String(ch).padStart(2, '0');
+      try { sendOsc({ address: `/config/userrout/in/${nn}`, args: [] }, X32_IP); } catch (e) {}
+      try { sendOsc({ address: `/ch/${nn}/config/name`, args: [] }, X32_IP); } catch (e) {}
+      try { sendOsc({ address: `/ch/${nn}/config/color`, args: [] }, X32_IP); } catch (e) {}
+    }
+    ws.send(JSON.stringify({ type: 'channel_names', names: channelNames }));
+    if (currentRoutingState && currentRoutingState.some(v => v !== null)) ws.send(JSON.stringify({ type: 'routing', values: currentRoutingState }));
 
-  ws.on('message', raw => {
-    let data;
-    try { data = JSON.parse(raw); } catch (e) { return; }
+    ws.on('message', raw => {
+      let data;
+      try { data = JSON.parse(raw); } catch (e) { return; }
 
       if (data && data.type === 'set_x32_ip') {
-      X32_IP = data.ip; console.log('Manual X32 IP set to', X32_IP);
-      try { sendOsc({ address: '/xinfo', args: [] }, X32_IP); } catch (e) {}
-      for (let ch = 1; ch <= 32; ch++) { const nn = String(ch).padStart(2, '0'); try { sendOsc({ address: `/ch/${nn}/config/name`, args: [] }, X32_IP); } catch (e) {} }
-      setTimeout(() => readAllRouting(ws), 300);
-      return;
-    }
-    if (!X32_IP) return console.warn('X32 not connected yet.');
+        X32_IP = data.ip; console.log('Manual X32 IP set to', X32_IP);
+        try { sendOsc({ address: '/xinfo', args: [] }, X32_IP); } catch (e) {}
+        for (let ch = 1; ch <= 32; ch++) { const nn = String(ch).padStart(2, '0'); try { sendOsc({ address: `/ch/${nn}/config/name`, args: [] }, X32_IP); } catch (e) {} }
+        setTimeout(() => readAllRouting(ws), 300);
+        return;
+      }
+      if (!X32_IP) return console.warn('X32 not connected yet.');
 
-    switch (data.type) {
-      case 'load_routing':
-        readAllRouting(ws);
-        break;
+      switch (data.type) {
+        case 'load_routing':
+          readAllRouting(ws);
+          break;
 
-      case 'toggle_inputs_block':
-        if (typeof data.block === 'number' && data.block >= 0 && data.block < routingBlocks.length) {
-          const idx = data.block; const val = Number(data.target);
-          console.log('[X32 ROUTE] Sending OSC for block', idx, val);
-          try { sendOsc({ address: routingBlocks[idx].osc, args: [{ type: 'i', value: val }] }, X32_IP); } catch (e) { console.error('Error sending block toggle OSC', e && e.message); }
-          setTimeout(() => { wss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) readAllRouting(c); }); }, 500);
-        } else console.warn('toggle_inputs_block: invalid block index', data.block);
-        break;
+        case 'get_blocks':
+          // Client explicitly requested block descriptors and current routing
+          try { ws.send(JSON.stringify({ type: 'blocks', blocks: routingBlocks })); } catch (e) {}
+          try { if (currentRoutingState && currentRoutingState.some(v => v !== null)) ws.send(JSON.stringify({ type: 'routing', values: currentRoutingState })); } catch (e) {}
+          break;
 
-      case 'toggle_inputs':
-        if (Array.isArray(data.targets) && data.targets.length === routingBlocks.length) {
-          data.targets.forEach((val, i) => { try { sendOsc({ address: routingBlocks[i].osc, args: [{ type: 'i', value: val }] }, X32_IP); } catch (e) { console.error('Error sending toggle', e && e.message); } });
-          setTimeout(() => { readAllRouting(ws); }, 500);
-        }
-        break;
+        case 'toggle_inputs_block':
+          if (typeof data.block === 'number' && data.block >= 0 && data.block < routingBlocks.length) {
+            const idx = data.block; const val = Number(data.target);
+            console.log('[X32 ROUTE] Sending OSC for block', idx, val);
+            try { sendOsc({ address: routingBlocks[idx].osc, args: [{ type: 'i', value: val }] }, X32_IP); } catch (e) { console.error('Error sending block toggle OSC', e && e.message); }
+            setTimeout(() => { if (wss && wss.clients) wss.clients.forEach(c => { if (c.readyState === WebSocket.OPEN) readAllRouting(c); }); }, 500);
+          } else console.warn('toggle_inputs_block: invalid block index', data.block);
+          break;
 
-      case 'ping':
-        try { oscPort.send({ address: '/xinfo', args: [] }, X32_IP, X32_OSC_PORT); } catch (e) {}
-        break;
+        case 'toggle_inputs':
+          if (Array.isArray(data.targets) && data.targets.length === routingBlocks.length) {
+            data.targets.forEach((val, i) => { try { sendOsc({ address: routingBlocks[i].osc, args: [{ type: 'i', value: val }] }, X32_IP); } catch (e) { console.error('Error sending toggle', e && e.message); } });
+            setTimeout(() => { readAllRouting(ws); }, 500);
+          }
+          break;
 
-      case 'clp':
-        const oscArgs = (data.args || []).map(v => Number.isInteger(v) ? { type: 'i', value: v } : (typeof v === 'number' ? { type: 'f', value: v } : { type: 's', value: String(v) }));
-        const padAddr = data.address.replace(/(\d+)$/, m => m.padStart(2, '0'));
-        console.log('CLP sending:', padAddr, oscArgs);
-  try { sendOsc({ address: padAddr, args: oscArgs }, X32_IP); } catch (e) { console.error('Error sending CLP', e && e.message); }
-        break;
+        case 'ping':
+          try { oscPort.send({ address: '/xinfo', args: [] }, X32_IP, X32_OSC_PORT); } catch (e) {}
+          break;
 
-      default:
-        console.log('Unhandled WS message type:', data.type);
-    }
+        case 'clp':
+          try {
+            const rawAddr = (data.address || '').toString();
+            const addr = rawAddr.trim();
+            if (!addr || addr[0] !== '/') { console.warn('Received invalid CLP address from client:', JSON.stringify(rawAddr)); break; }
+            const oscArgs = (data.args || []).map(v => Number.isInteger(v) ? { type: 'i', value: v } : (typeof v === 'number' ? { type: 'f', value: v } : { type: 's', value: String(v) }));
+            // Only pad a trailing numeric segment when it's directly after a slash
+            // so we don't accidentally change addresses like '/config/routing/IN/1-8'
+            // (which would otherwise become '/config/routing/IN/1-08').
+            const padAddr = addr.replace(/\/(\d+)$/, (m, p1) => '/' + p1.padStart(2, '0'));
+            console.log('CLP sending:', padAddr, oscArgs);
+            try { sendOsc({ address: padAddr, args: oscArgs }, X32_IP); } catch (e) { console.error('Error sending CLP', e && e.message, 'payload:', JSON.stringify({ address: padAddr, args: oscArgs })); }
+          } catch (e) { console.error('CLP handler failed', e && e.message); }
+          break;
+
+        default:
+          console.log('Unhandled WS message type:', data.type);
+      }
+    });
   });
-});
+}
+
+// Helper to (re)start the HTTP + WebSocket server on a given port
+function startServer(port) {
+  return new Promise((resolve, reject) => {
+    try {
+      if (server) {
+        try { server.close(); } catch (e) {}
+        server = null; wss = null;
+      }
+      server = http.createServer(app);
+      wss = new WebSocket.Server({ server });
+      setupWebsocketHandlers(wss);
+      server.listen(port, '0.0.0.0', () => {
+        CURRENT_PORT = port;
+        console.log(`Web UI listening on http://localhost:${port}`);
+        resolve(server);
+      });
+      server.on('error', err => { reject(err); });
+    } catch (e) { reject(e); }
+  });
+}
 
 function updateX32Ip(newIp, reason = 'discovery') {
   if (!newIp) return;
@@ -416,7 +485,141 @@ app.get('/status', (req, res) => {
   try {
     const clients = Array.from(wss.clients || []).filter(c => c && c.readyState === WebSocket.OPEN).length;
     const ifaces = os.networkInterfaces();
-    return res.json({ ok: true, x32Ip: X32_IP || null, wsClients: clients, pingCount, ifaces });
+    return res.json({ ok: true, x32Ip: X32_IP || null, wsClients: clients, pingCount, ifaces, port: CURRENT_PORT || Number(process.env.PORT) || 3000 });
+  } catch (e) { return res.status(500).json({ ok: false, error: e && e.message }); }
+});
+
+// Allow changing the HTTP server port at runtime. This will attempt to
+// rebind the server to the requested port and return success or failure.
+app.post('/set-port', express.json(), (req, res) => {
+  try {
+    const body = req.body || {};
+    const port = Number(body.port || 0);
+    if (!port || port < 1 || port > 65535) return res.status(400).json({ ok: false, reason: 'invalid port' });
+    // Persist the chosen port to disk and exit so the app can be restarted
+    try {
+      // Atomic write: write to a temp file then rename into place
+      const tmp = PORT_PERSIST_PATH + '.tmp';
+      try {
+        fs.writeFileSync(tmp, String(port), 'utf8');
+        fs.renameSync(tmp, PORT_PERSIST_PATH);
+      } catch (fsErr) {
+        // Cleanup tmp on failure if present
+        try { if (fs.existsSync(tmp)) fs.unlinkSync(tmp); } catch (u) {}
+        throw fsErr;
+      }
+      res.json({ ok: true, port, message: 'port_saved_restart_required' });
+      console.log('Persisted new port', port, 'to', PORT_PERSIST_PATH, '- exiting to allow restart.');
+      // No detached spawn here — the host (Electron main or external supervisor)
+      // is responsible for restarting the server after we exit. Give the
+      // response a moment to complete before exiting.
+      console.log('Persisted port and exiting; supervisor should restart server.');
+      setTimeout(() => process.exit(0), 200);
+    } catch (e) {
+      console.error('Failed to write port file', e && e.message);
+      return res.status(500).json({ ok: false, reason: 'write_failed', error: e && e.message });
+    }
+  } catch (e) { return res.status(500).json({ ok: false, error: e && e.message }); }
+});
+
+// Dev-only helper: trigger the external supervisor to restart the server
+// This endpoint is intentionally restricted to local requests (127.0.0.1 / ::1 / localhost)
+// or when the environment variable DUBSWITCH_DEV_ALLOW_SUPERVISOR=1 is set. It works by
+// touching/writing the `server.port` file so the dev supervisor (scripts/supervise-server.js)
+// notices the change and restarts the child process. This keeps production builds safe.
+app.post('/supervisor-restart', (req, res) => {
+  try {
+    const allowByEnv = process.env.DUBSWITCH_DEV_ALLOW_SUPERVISOR === '1';
+    // Express sets req.ip; strip IPv4-mapped IPv6 prefix if present
+    const remote = (req.ip || '').replace(/^::ffff:/, '');
+    const hostHeader = (req.hostname || '').toLowerCase();
+    if (!allowByEnv) {
+      // Accept only local loopback addresses or explicit localhost hostnames
+      const isLocal = remote === '127.0.0.1' || remote === '::1' || hostHeader === 'localhost';
+      if (!isLocal) return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
+
+    try {
+      const data = String(CURRENT_PORT || Number(process.env.PORT) || 3000);
+      // Prefer an atomic write to update mtime/content and avoid partial-writes
+      const tmp = PORT_PERSIST_PATH + '.tmp';
+      try {
+        fs.writeFileSync(tmp, data, 'utf8');
+        fs.renameSync(tmp, PORT_PERSIST_PATH);
+      } catch (e) {
+        // Fallback: if file exists, just update its mtime; otherwise write file
+        try {
+          if (fs.existsSync(PORT_PERSIST_PATH)) fs.utimesSync(PORT_PERSIST_PATH, new Date(), new Date());
+          else fs.writeFileSync(PORT_PERSIST_PATH, data, 'utf8');
+        } catch (e2) {
+          // Last-resort: ignore failure but log it
+          console.warn('supervisor-restart: failed to touch port file', e2 && e2.message);
+        }
+      }
+    } catch (e) { /* ignore minor touch errors */ }
+
+    console.log('Dev supervisor-restart triggered by', req.ip || req.hostname);
+    return res.json({ ok: true, triggered: true });
+  } catch (e) { return res.status(500).json({ ok: false, error: e && e.message }); }
+});
+
+// Dev-only supervisor status endpoint: reports PID, whether the PID is running,
+// and a small tail of the supervised child's log files for debugging in the UI.
+app.get('/supervisor-status', (req, res) => {
+  try {
+    const allowByEnv = process.env.DUBSWITCH_DEV_ALLOW_SUPERVISOR === '1';
+    const remote = (req.ip || '').replace(/^::ffff:/, '');
+    const hostHeader = (req.hostname || '').toLowerCase();
+    if (!allowByEnv) {
+      const isLocal = remote === '127.0.0.1' || remote === '::1' || hostHeader === 'localhost';
+      if (!isLocal) return res.status(403).json({ ok: false, error: 'forbidden' });
+    }
+
+    const PID_FILE = path.join(__dirname, 'scripts', 'supervisor.pid');
+    const SUP_OUT = path.join(__dirname, 'scripts', 'supervisor.out.log');
+    const CHILD_LOG = path.join(__dirname, 'server_child.log');
+
+    const info = { ok: true, pidFileExists: false, pid: null, pidRunning: false, pidMtime: null, supervisorOut: null, childLog: null };
+    try {
+      if (fs.existsSync(PID_FILE)) {
+        info.pidFileExists = true;
+        try { const pidTxt = fs.readFileSync(PID_FILE, 'utf8').trim(); info.pid = Number(pidTxt) || null; } catch (e) {}
+        try { const st = fs.statSync(PID_FILE); info.pidMtime = st.mtime; } catch (e) {}
+      }
+    } catch (e) {}
+
+    if (info.pid) {
+      try {
+        // Check if process exists (kill 0 will throw if not present on some platforms)
+        process.kill(info.pid, 0);
+        info.pidRunning = true;
+      } catch (e) { info.pidRunning = false; }
+    }
+
+    // Supervisor stdout/log (small metadata)
+    try {
+      if (fs.existsSync(SUP_OUT)) {
+        const st = fs.statSync(SUP_OUT);
+        info.supervisorOut = { path: SUP_OUT, size: st.size, mtime: st.mtime };
+      }
+    } catch (e) {}
+
+    // Tail of child log (last ~4KB) to avoid heavy reads
+    try {
+      if (fs.existsSync(CHILD_LOG)) {
+        const st = fs.statSync(CHILD_LOG);
+        const size = st.size;
+        const tailBytes = 4096;
+        const start = Math.max(0, size - tailBytes);
+        const fd = fs.openSync(CHILD_LOG, 'r');
+        const buf = Buffer.alloc(size - start);
+        fs.readSync(fd, buf, 0, buf.length, start);
+        fs.closeSync(fd);
+        info.childLog = { path: CHILD_LOG, size, mtime: st.mtime, tail: buf.toString('utf8') };
+      }
+    } catch (e) { /* swallow */ }
+
+    return res.json(info);
   } catch (e) { return res.status(500).json({ ok: false, error: e && e.message }); }
 });
 
@@ -425,20 +628,20 @@ app.get('/get-matrix', (req, res) => {
   return res.json({ matrix: persistedMatrix || {} });
 });
 
-// Start HTTP server (configurable via PORT env var)
-const PORT = Number(process.env.PORT) || 3000;
+// Start HTTP server on the configured port (persistedPort overrides env)
+const PORT = persistedPort || Number(process.env.PORT) || 3000;
 
-server.on('error', (err) => {
-  if (err && err.code === 'EADDRINUSE') {
-    console.error(`EADDRINUSE: port ${PORT} already in use. Another process is bound to this port.`);
-    console.error(`Tip: run \`lsof -nP -iTCP:${PORT} -sTCP:LISTEN\` to find the process, or start with a different port: \`PORT=4000 npm run server\`.`);
-    // Exit with non-zero code so process managers know the start failed
+(async () => {
+  try {
+    await startServer(PORT);
+    module.exports = { app, server };
+  } catch (err) {
+    if (err && err.code === 'EADDRINUSE') {
+      console.error(`EADDRINUSE: port ${PORT} is unavailable. Please choose a different port or free the port.`);
+      console.error(`Tip: run \`lsof -nP -iTCP:${PORT} -sTCP:LISTEN\` to find the process, or start with a different port: \`PORT=4000 node server.js\`.`);
+      process.exit(1);
+    }
+    console.error('Failed to start server:', err && err.message);
     process.exit(1);
   }
-  console.error('HTTP server error:', err && err.message);
-  process.exit(1);
-});
-
-server.listen(PORT, '0.0.0.0', () => console.log(`Web UI listening on http://localhost:${PORT}`));
-
-module.exports = { app, server };
+})();

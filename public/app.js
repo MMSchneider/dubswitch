@@ -73,26 +73,35 @@ function safeSendWs(data) {
 const IS_DEV = (location.hostname === 'localhost' || location.hostname === '127.0.0.1' || window.__DUBSWITCH_DEV_SHIMS__ === true);
 
 // API origin helper: when running as a packaged app (file://) the renderer
-// cannot use relative URLs like '/status'. In that case default to
-// http://localhost:3000 unless an explicit origin is provided via
-// window.__DUBSWITCH_API_ORIGIN__ (useful for tests or custom launches).
-const API_ORIGIN = (function(){
+// cannot use relative URLs like '/status'. Provide a getter that prefers:
+// 1) window.__DUBSWITCH_API_ORIGIN__ (programmatic override)
+// 2) localStorage 'dubswitch_api_origin' (persisted via Settings)
+// 3) file:// fallback -> http://localhost:3000
+// 4) empty string for normal web context (use relative URLs)
+function getApiOrigin() {
   try {
     if (window.__DUBSWITCH_API_ORIGIN__) return String(window.__DUBSWITCH_API_ORIGIN__);
-    if (location.protocol === 'file:') return 'http://localhost:3000';
-    // normal web context: use relative paths (empty origin -> relative)
+    const stored = (typeof localStorage !== 'undefined') ? localStorage.getItem('dubswitch_api_origin') : null;
+    if (stored) return stored;
+    if (location && location.protocol === 'file:') return 'http://localhost:3000';
     return '';
-  } catch (e) { return '';} 
-})();
+  } catch (e) { return ''; }
+}
 
 function apiUrl(path) {
   if (!path) path = '/';
+  const API_ORIGIN = getApiOrigin();
   if (API_ORIGIN) {
     // ensure there's a single slash between origin and path
     return API_ORIGIN.replace(/\/$/, '') + (path.startsWith('/') ? path : ('/' + path));
   }
   return path;
 }
+
+// NOTE: Origin probing and automatic fallback logic removed. The app will
+// use the configured API origin (localStorage / runtime override) or the
+// current location. When the user changes the port the server persists the
+// choice and exits so the application can be restarted on the new port.
 
 // Minimal DOM element fallbacks used by various functions below. If the
 // real element exists, these will be replaced by actual nodes during
@@ -101,8 +110,69 @@ function apiUrl(path) {
 const _noopEl = () => ({ disabled: false, style: {}, innerHTML: '', textContent: '', addEventListener() {}, removeEventListener() {} });
 window.statusEl = document.getElementById('status') || _noopEl();
 window.toggleInputsBtn = document.getElementById('toggle-inputs') || _noopEl();
-window.routingTable = document.getElementById('routing-table') || _noopEl();
+// routingTable element removed from UI; keep a safe reference as a no-op
+window.routingTable = _noopEl();
 window.userpatchContainer = document.getElementById('userpatch-container') || _noopEl();
+
+// Minimal connect dialog helpers (safe no-op implementations when original
+// dialog code was removed). These are lightweight: they update the header
+// status text and create a transient on-screen overlay when invoked.
+window.connectDialogTimeout = window.connectDialogTimeout || null;
+window.initialConnectShown = window.initialConnectShown || false;
+function showConnectDialog(force) {
+  try {
+    initialConnectShown = true;
+    if (window.statusEl && window.statusEl.textContent !== undefined) {
+      window.statusEl.textContent = 'Local: Connecting…';
+    }
+    // create a small overlay if none exists (non-blocking)
+    let el = document.getElementById('connect-overlay');
+    if (!el && force) {
+      el = document.createElement('div'); el.id = 'connect-overlay';
+      el.style.position = 'fixed'; el.style.left = '50%'; el.style.top = '14%'; el.style.transform = 'translateX(-50%)';
+      el.style.background = 'rgba(0,0,0,0.7)'; el.style.color = '#fff'; el.style.padding = '8px 12px';
+      el.style.borderRadius = '8px'; el.style.zIndex = 20000; el.textContent = 'Connecting to local server…';
+      document.body.appendChild(el);
+    }
+  } catch (e) { console.warn('showConnectDialog failed', e); }
+}
+
+function hideConnectDialog() {
+  try {
+    initialConnectShown = false;
+    if (window.statusEl && window.statusEl.textContent !== undefined) {
+      // Reset to default; pollStatusForHeader will update shortly
+      window.statusEl.textContent = 'Local: —';
+    }
+    const el = document.getElementById('connect-overlay'); if (el) el.remove();
+    if (connectDialogTimeout) { try { clearTimeout(connectDialogTimeout); connectDialogTimeout = null; } catch(e){} }
+  } catch (e) { console.warn('hideConnectDialog failed', e); }
+}
+
+// Friendly one-line status used in multiple places. Keeps header consistent
+function setConnectedStatus(x32Ip) {
+  try {
+    const ip = x32Ip || window.lastX32Ip || '—';
+    const el = document.getElementById('x32-ip-indicator') || window.x32IpIndicator || null;
+    if (el) el.textContent = 'X32: ' + ip;
+    const statusElLocal = document.getElementById('status') || window.statusEl || null;
+    if (statusElLocal) statusElLocal.textContent = 'Local: ' + (getApiOrigin() || (location && location.host) || '—');
+  } catch (e) { console.warn('setConnectedStatus failed', e); }
+}
+
+// Keep legacy bare globals in sync with authoritative window.* values.
+// Many existing functions reference the bare identifiers (routingState, blocks)
+// while WebSocket handlers update window.routingState. Call syncGlobals()
+// inside routing-aware renderers to ensure we always read the current data.
+function syncGlobals() {
+  try {
+    // Prefer the window.* authoritative values
+    if (Array.isArray(window.routingState)) routingState = window.routingState;
+    if (Array.isArray(window.blocks)) blocks = window.blocks;
+    if (window.userPatches) userPatches = window.userPatches;
+    if (window.channelNames) channelNames = window.channelNames;
+  } catch (e) { /* ignore sync errors */ }
+}
 
 // Defensive runtime defaults: when running as a packaged file:// app the
 // server hasn't yet populated these globals and many UI renderers assume
@@ -111,6 +181,8 @@ window.userpatchContainer = document.getElementById('userpatch-container') || _n
 window.blocks = window.blocks || [];
 window.routingState = window.routingState || [null, null, null, null];
 window.userPatches = window.userPatches || {};
+// Track pending block toggles so the UI can show an in-flight spinner/disabled state
+window._blockTogglePending = window._blockTogglePending || [false,false,false,false];
 window.channelNames = window.channelNames || {};
 window.channelNamePending = window.channelNamePending || {};
 window.channelColors = window.channelColors || {};
@@ -130,74 +202,203 @@ var colorMap = window.colorMap || { null: 'transparent' };
 
 // Lightweight periodic sync to keep the legacy identifiers pointing at the
 // latest values if the server updates `window.*` directly.
-setInterval(() => {
-  try {
-    blocks = window.blocks || blocks;
-    routingState = window.routingState || routingState;
-    userPatches = window.userPatches || userPatches;
-    channelNames = window.channelNames || channelNames;
-    channelNamePending = window.channelNamePending || channelNamePending;
-    channelColors = window.channelColors || channelColors;
-    colorMap = window.colorMap || colorMap;
-  } catch (e) {}
-}, 400);
+                savePortBtn.onclick = async () => {
+                  try {
+                    const portEl = document.getElementById('localPortInput');
+                    if (!portEl || !portEl.value) { showToast('Enter a port first'); return; }
+                    const portVal = String(portEl.value).trim();
+                    if (!/^\d{2,5}$/.test(portVal)) { showToast('Invalid port'); return; }
+                    savePortBtn.disabled = true;
+                    savePortBtn.textContent = 'Saving…';
+                    try {
+                      const resp = await fetch(apiUrl('/set-port'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ port: Number(portVal) }) });
+                      const json = await resp.json().catch(()=>null);
+                      if (resp.ok && json && json.ok) {
+                        // Optionally persist the preferred origin for the renderer
+                        const origin = 'http://localhost:' + portVal;
+                        try { localStorage.setItem('dubswitch_api_origin', origin); } catch (e) {}
+                        // Inform the user that a restart is required
+                        showToast('Port saved. Restarting server to apply the change…', 6000);
+                        // If running inside Electron with supervision available, request a supervised restart
+                        try {
+                          if (window.electronAPI && typeof window.electronAPI.restartServer === 'function') {
+                            const r = await window.electronAPI.restartServer();
+                            if (r && r.ok) showToast('Server restart requested.', 3000);
+                            else showToast('Server restart failed: ' + (r && r.error ? r.error : 'unknown'));
+                          } else if (window.electronAPI && typeof window.electronAPI.restartApp === 'function') {
+                            // Fallback: relaunch the whole app
+                            const r2 = await window.electronAPI.restartApp();
+                            if (r2 && r2.ok) showToast('Application relaunch requested.', 3000);
+                            else showToast('Relaunch failed: ' + (r2 && r2.error ? r2.error : 'unknown'));
+                          } else {
+                            // Leave it up to the user to restart manually
+                          }
+                        } catch (e) { console.error('Error requesting restart:', e); }
+                      } else {
+                        const msg = (json && (json.reason || json.error)) ? (json.reason || json.error) : ('HTTP ' + resp.status);
+                        showToast('Failed to change port: ' + msg);
+                      }
+                    } catch (e) { console.error('set-port request failed', e); showToast('Failed to contact server'); }
+                  } finally { try { savePortBtn.disabled = false; savePortBtn.textContent = 'Save Port'; } catch (e){} }
+                };
+            try {
+              const restartNowBtn = document.getElementById('restartNowBtn');
+              if (restartNowBtn) {
+                restartNowBtn.onclick = async () => {
+                  try {
+                    // Prefer restarting only the supervised server when available
+                    if (window.electronAPI && typeof window.electronAPI.restartServer === 'function') {
+                      const resp = await window.electronAPI.restartServer();
+                      if (resp && resp.ok) showToast('Restarting local server…', 3000);
+                      else showToast('Server restart failed: ' + (resp && resp.error ? resp.error : 'unknown'));
+                      return;
+                    }
+                    // Fallback: relaunch the whole Electron app
+                    if (window.electronAPI && typeof window.electronAPI.restartApp === 'function') {
+                      const resp = await window.electronAPI.restartApp();
+                      if (resp && resp.ok) showToast('Restarting application…', 3000);
+                      else showToast('Restart request failed: ' + (resp && resp.error ? resp.error : 'unknown'));
+                      return;
+                    }
+                    // If running in dev (localhost) try to hit the dev supervisor endpoint
+                    if (IS_DEV) {
+                      try {
+                        const r = await fetch(apiUrl('/supervisor-restart'), { method: 'POST' });
+                        if (r.ok) {
+                          const j = await r.json().catch(()=>null);
+                          if (j && j.ok) { showToast('Dev supervisor restart triggered.', 3000); return; }
+                        }
+                      } catch (e) { /* ignore and fallthrough to manual message */ }
+                    }
+                    // As a last resort, instruct the user to restart manually
+                    showToast('Please restart the application manually to apply changes.');
+                  } catch (e) { console.error('restart request failed', e); showToast('Restart failed'); }
+                };
+              }
+            } catch (e) {}
+            try {
+              // Server status display + paged log viewer (uses electronAPI when available)
+              const LOG_PAGE_BYTES = 64 * 1024; // 64KB
+              let logTailOffset = null;
 
-// Simple connect-dialog helpers used throughout the app. They try to
-// manipulate the DOM when the elements exist; otherwise they are safe no-ops.
-function showConnectDialog(force) {
-  const el = document.getElementById('connect-warning');
-  if (el) el.style.display = '';
-  window.initialConnectShown = window.initialConnectShown || !!force;
-}
-function hideConnectDialog() {
-  const el = document.getElementById('connect-warning');
-  if (el) el.style.display = 'none';
-}
-function setConnectedStatus(ip) {
-  try {
-    const s = document.getElementById('status');
-    if (s) s.textContent = ip ? `Status: Connected (${ip})` : 'Status: Connected';
-  } catch (e) {}
-}
+              async function fetchServerStatus() {
+                let status = { running: null, lastExit: null };
+                try {
+                  if (window.electronAPI && window.electronAPI.getServerStatus) {
+                    status = await window.electronAPI.getServerStatus();
+                  } else {
+                    const r = await fetch(apiUrl('/status'));
+                    if (r.ok) {
+                      const js = await r.json().catch(()=>null);
+                      status.running = true;
+                      status.lastExit = { code: null, signal: null, time: new Date().toISOString(), info: js };
+                    } else {
+                      status.running = false;
+                    }
+                  }
+                } catch (err) {
+                  status.running = false;
+                  status.lastExit = status.lastExit || { code: null, signal: null, time: new Date().toISOString(), info: String(err) };
+                }
+                return status;
+              }
 
-// Lightweight flag used by UI logic
-window.x32Connected = window.x32Connected || false;
-window.connectDialogTimeout = window.connectDialogTimeout || null;
-window.initialConnectShown = window.initialConnectShown || false;
+              async function updateServerStatusUI() {
+                const s = await fetchServerStatus();
+                const runningLabel = s.running ? 'running' : 'stopped';
+                const origin = (typeof localStorage !== 'undefined' && localStorage.getItem('dubswitch_api_origin')) ? localStorage.getItem('dubswitch_api_origin') : '—';
+                const statusEl = document.getElementById('serverStatusPreview');
+                if (statusEl) statusEl.textContent = `Origin: ${origin} | status: ${runningLabel}`;
+                const lastEl = document.getElementById('serverLastStatus');
+                // If running in dev mode, attempt to fetch richer supervisor status
+                if (IS_DEV) {
+                  try {
+                    const r = await fetch(apiUrl('/supervisor-status'));
+                    if (r.ok) {
+                      const info = await r.json().catch(()=>null);
+                      if (info && lastEl) {
+                        const t = info.pidMtime ? new Date(info.pidMtime).toLocaleString() : '—';
+                        lastEl.textContent = `Supervisor PID: ${info.pid || '—'} running=${info.pidRunning ? 'yes' : 'no'} (pid mtime: ${t})`;
+                        return;
+                      }
+                    }
+                  } catch (e) { /* ignore and fall back to generic display */ }
+                }
+                if (s.lastExit && lastEl) {
+                  const t = s.lastExit.time ? new Date(s.lastExit.time).toLocaleString() : '—';
+                  const code = s.lastExit.code != null ? s.lastExit.code : '—';
+                  const signal = s.lastExit.signal || '—';
+                  lastEl.textContent = `Last exit: code=${code} signal=${signal} at ${t}`;
+                } else if (lastEl) {
+                  lastEl.textContent = 'Last start: —';
+                }
+              }
 
-// Essential stubs that are referenced directly by HTML onload/onclick.
-// These remain available in all environments to avoid race conditions.
-// Improved refresh: re-request per-channel CLP reads when called while WS is open.
-function refreshUserPatches() {
-  try {
-    // If WS is open, request fresh CLP reads for user routs and channel names
-    if (window.ws && window.ws.readyState === 1) {
-      for (let ch = 1; ch <= 32; ch++) {
-        const nn = String(ch).padStart(2, '0');
-        safeSendWs(JSON.stringify({ type: 'clp', address: `/config/userrout/in/${nn}`, args: [] }));
-        safeSendWs(JSON.stringify({ type: 'clp', address: `/ch/${nn}/config/name`, args: [] }));
-      }
-      // mark as pending so UI shows spinner until at least one reply
-      window.userPatchesPending = true;
-      renderUserPatches();
-      try { renderStaticMatrixTable(); } catch (e) {}
-      return;
-    }
-    if (typeof renderUserPatches === 'function') renderUserPatches();
-    else loadChannelNames();
-  } catch (e) { console.error('refreshUserPatches failed', e); }
-}
+              async function fetchServerLogPage(offset, length) {
+                if (window.electronAPI && window.electronAPI.getServerLog) {
+                  return await window.electronAPI.getServerLog({ offset, length });
+                }
+                // fallback: try to fetch a full log endpoint
+                const r = await fetch(apiUrl('/server-child-log'));
+                if (!r.ok) throw new Error('Unable to fetch server log');
+                const txt = await r.text();
+                // Return tail slice when negative offset requested
+                if (offset < 0) {
+                  const tail = txt.slice(Math.max(0, txt.length + offset));
+                  return { size: txt.length, chunk: tail };
+                }
+                return { size: txt.length, chunk: txt.slice(offset, offset + length) };
+              }
 
-function setAllUserPatchesLocal() {
-  // Set all channels to Local (numeric 1..32) in-memory and notify server
-  try {
-    for (let ch = 1; ch <= 32; ch++) { window.userPatches[ch] = ch; }
-    safeSendWs(JSON.stringify({ type: 'toggle_inputs', targets: (window.blocks||[]).map(b => b.localin || 0) }));
-    if (typeof renderUserPatches === 'function') renderUserPatches();
-    try { renderStaticMatrixTable(); if (window.persistCurrentMatrix) window.persistCurrentMatrix(); } catch (e) {}
-  } catch (e) { console.error('setAllUserPatchesLocal failed', e); }
-}
+              async function refreshLogToEnd() {
+                try {
+                  const resp = await fetchServerLogPage(-LOG_PAGE_BYTES, LOG_PAGE_BYTES);
+                  const el = document.getElementById('serverLogContent'); if (el) el.textContent = resp.chunk || '';
+                  const sizeLabel = document.getElementById('logSizeLabel'); if (sizeLabel) sizeLabel.textContent = `Size: ${resp.size}`;
+                  logTailOffset = resp.size - (resp.chunk ? resp.chunk.length : 0);
+                  if (logTailOffset < 0) logTailOffset = 0;
+                } catch (err) {
+                  const el = document.getElementById('serverLogContent'); if (el) el.textContent = 'Error loading log: ' + String(err);
+                  const sizeLabel = document.getElementById('logSizeLabel'); if (sizeLabel) sizeLabel.textContent = 'Size: —';
+                }
+              }
 
+              async function loadOlder() {
+                try {
+                  if (logTailOffset == null) { await refreshLogToEnd(); return; }
+                  const readLen = LOG_PAGE_BYTES;
+                  const newOffset = Math.max(0, logTailOffset - readLen);
+                  const resp = await fetchServerLogPage(newOffset, readLen);
+                  const el = document.getElementById('serverLogContent');
+                  const existing = el ? el.textContent || '' : '';
+                  if (el) el.textContent = (resp.chunk || '') + existing;
+                  logTailOffset = newOffset;
+                  const sizeLabel = document.getElementById('logSizeLabel'); if (sizeLabel) sizeLabel.textContent = `Size: ${resp.size}`;
+                } catch (err) {
+                  const el = document.getElementById('serverLogContent'); if (el) el.textContent = 'Error loading older logs: ' + String(err);
+                }
+              }
+
+              // Wire up modal buttons and the view log button
+              const viewLogBtn = document.getElementById('viewServerLogBtn');
+              if (viewLogBtn) {
+                viewLogBtn.onclick = async () => {
+                  try {
+                    $('#serverLogModal').modal('show');
+                    logTailOffset = null;
+                    const el = document.getElementById('serverLogContent'); if (el) el.textContent = 'Loading…';
+                    await refreshLogToEnd();
+                  } catch (e) { console.error('show log modal failed', e); showToast('Failed to open server log'); }
+                };
+              }
+
+              const logRefreshBtn = document.getElementById('logRefreshBtn'); if (logRefreshBtn) logRefreshBtn.onclick = refreshLogToEnd;
+              const logLoadOlderBtn = document.getElementById('logLoadOlderBtn'); if (logLoadOlderBtn) logLoadOlderBtn.onclick = loadOlder;
+
+              // Start status polling
+              updateServerStatusUI();
+              setInterval(updateServerStatusUI, 5000);
+            } catch (e) {}
 function setAllUserPatchesCard() {
   // Set all channels to DAW (example offset 128+ch)
   try {
@@ -308,6 +509,11 @@ function createWs(url) {
     try {
       // Ask server to load routing (server will query the X32 and reply with 'routing')
       safeSendWs(JSON.stringify({ type: 'load_routing' }));
+      
+      // Ask server to explicitly send block descriptors (defensive: ensures
+      // the client receives the blocks even if a timing race occurred during
+      // the initial connection handshake).
+      safeSendWs(JSON.stringify({ type: 'get_blocks' }));
       // Request per-channel user routing values (server will forward replies as 'clp')
       for (let ch = 1; ch <= 32; ch++) {
         const nn = String(ch).padStart(2, '0');
@@ -421,14 +627,26 @@ function renderStaticMatrixTable() {
     return opts;
   }
 
-  // Block-level configuration has been removed; keep a short explanatory note
-  let html = `<div class="small-muted" style="margin-bottom:8px">Block-level toggle configuration has been removed. Use the per-channel A/B table below to inspect or reference enumerated inputs.</div>`;
-  // Legend removed — only show explanatory note and the per-channel table
+  // Block-level configuration has been removed; the per-channel table is shown below.
+  // (User requested the longer explanatory paragraph be removed.)
+  let html = '';
+  // Add a compact bulk-set dropdown after the B header for quick operations
+  html += `<div style="display:flex;align-items:center;gap:12px;margin-top:8px;margin-bottom:6px">
+    <div class="small-muted">Quick set for column B:</div>
+    <select id="matrix-b-bulk-select" class="form-control form-control-sm" style="width:160px">
+      <option value="">-- Select --</option>
+      <option value="local">Local</option>
+      <option value="daw">DAW</option>
+      <option value="aes50a">AES50A</option>
+      <option value="aes50b">AES50B</option>
+    </select>
+    <button id="matrix-b-bulk-apply" class="btn btn-sm btn-primary">Apply to all B</button>
+  </div>`;
   // Per-channel A/B view (visual only)
-  html += `<div class="table-responsive" style="margin-top:12px"><table class="table table-sm"><thead><tr><th>Ch</th><th>A</th><th>B</th></tr></thead><tbody>`;
+  html += `<div class="table-responsive matrix-table-wrap" style="margin-top:6px"><table class="table table-sm"><thead><tr><th>Ch</th><th>A</th><th>B</th></tr></thead><tbody>`;
   for (let ch = 1; ch <= 32; ch++) {
     const nn = String(ch).padStart(2,'0');
-    html += `<tr><td>${nn}</td>`;
+  html += `<tr><td class="matrix-ch-number">${nn}</td>`;
     // For per-channel selects, include a few common defaults plus enumerated inputs.
     // If we have an enumerated value for this channel, pre-select it in column A.
   // Determine preselected values: prefer persisted server matrix then enumerate map
@@ -545,10 +763,108 @@ function renderStaticMatrixTable() {
       changeDebounce = setTimeout(()=>{ sendFullMatrixState(); changeDebounce = null; }, 350);
     }, { passive: true });
   });
+
+  // Wire bulk-set "Apply to all B" behaviour
+  try {
+    const bulkSelect = document.getElementById('matrix-b-bulk-select');
+    const bulkBtn = document.getElementById('matrix-b-bulk-apply');
+    if (bulkBtn && bulkSelect) {
+      bulkBtn.addEventListener('click', (ev) => {
+        try {
+          const val = bulkSelect.value;
+          if (!val) { showToast('Select a source to apply'); return; }
+          // Confirm with the user
+          const human = (val === 'local') ? 'Local' : (val === 'daw' ? 'DAW' : (val === 'aes50a' ? 'AES50A' : 'AES50B'));
+          // Use Bootstrap modal for confirmation
+          try {
+            const modalText = document.getElementById('bulkApplyConfirmText');
+            const okBtn = document.getElementById('bulkApplyConfirmOk');
+            const $modal = window.jQuery ? window.jQuery('#bulkApplyConfirmModal') : null;
+            if (modalText) modalText.textContent = `Are you sure you want to set all B inputs to ${human}? This will overwrite current B values.`;
+            // show modal
+            if ($modal && $modal.modal) {
+              // Ensure previous handlers are removed to avoid duplicate application
+              okBtn && okBtn.replaceWith(okBtn.cloneNode(true));
+              const freshOk = document.getElementById('bulkApplyConfirmOk');
+              $modal.modal('show');
+              // Attach one-time click handler
+              freshOk.addEventListener('click', () => {
+                try {
+                  $modal.modal('hide');
+                } catch (e) {}
+                  // Snapshot current B values for undo
+                  const snapshot = {};
+                  for (let ch = 1; ch <= 32; ch++) {
+                    const nn = String(ch).padStart(2, '0');
+                    const bEl = document.querySelector(`.matrix-select-b[data-ch="${nn}"]`);
+                    snapshot[nn] = bEl ? bEl.value : null;
+                  }
+                  pushMatrixUndo(snapshot);
+                  // Apply mapping now
+                  for (let ch = 1; ch <= 32; ch++) {
+                    const nn = String(ch).padStart(2, '0');
+                    const bEl = document.querySelector(`.matrix-select-b[data-ch="${nn}"]`);
+                    if (!bEl) continue;
+                    let setVal = '';
+                    if (val === 'local') setVal = String(ch);
+                    else if (val === 'daw') setVal = String(128 + ch);
+                    else if (val === 'aes50a') setVal = String(32 + ch);
+                    else if (val === 'aes50b') setVal = String(80 + ch);
+                    if (bEl.value !== setVal) {
+                      bEl.value = setVal;
+                      bEl.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                  }
+                  if (changeDebounce) clearTimeout(changeDebounce);
+                  changeDebounce = setTimeout(()=>{ sendFullMatrixState(); changeDebounce = null; }, 200);
+                  // Show toast with Undo
+                  showToast(`Applied ${human} to all B inputs`, 5000, 'Undo', ()=>{
+                    try {
+                      const prev = popMatrixUndo();
+                      if (!prev) { showToast('Nothing to undo'); return; }
+                      // restore
+                      for (let ch = 1; ch <= 32; ch++) {
+                        const nn = String(ch).padStart(2, '0');
+                        const bEl = document.querySelector(`.matrix-select-b[data-ch="${nn}"]`);
+                        if (!bEl) continue;
+                        const v = prev[nn] != null ? String(prev[nn]) : '';
+                        if (bEl.value !== v) {
+                          bEl.value = v;
+                          bEl.dispatchEvent(new Event('change', { bubbles: true }));
+                        }
+                      }
+                      if (changeDebounce) clearTimeout(changeDebounce);
+                      changeDebounce = setTimeout(()=>{ sendFullMatrixState(); changeDebounce = null; }, 200);
+                      showToast('Undo applied');
+                    } catch (e) { console.error('undo failed', e); showToast('Undo failed'); }
+                  });
+              }, { passive: true });
+            } else {
+              // Modal unavailable: abort and inform user. We intentionally do not
+              // fall back to native confirm() to avoid inconsistent UX in packaged apps.
+              showToast('Confirmation dialog unavailable — please use the Settings UI inside the packaged app.', 5000);
+            }
+          } catch (e) { console.error('modal bulk apply failed', e); showToast('Bulk apply failed'); }
+        } catch (e) { console.error('bulk apply failed', e); showToast('Bulk apply failed'); }
+      }, { passive: true });
+    }
+  } catch (e) {}
 }
 
 // Render static table once DOM ready
-window.addEventListener('DOMContentLoaded', ()=>{ renderStaticMatrixTable(); });
+window.addEventListener('DOMContentLoaded', async ()=>{
+  try {
+    // Try to load server-persisted matrix so column B values are restored after restart
+    try {
+      const resp = await fetch(apiUrl('/get-matrix'));
+      if (resp && resp.ok) {
+        const j = await resp.json();
+        if (j && j.matrix) window._persistedMatrix = j.matrix;
+      }
+    } catch (e) { /* ignore network errors; render fallback */ }
+    try { renderStaticMatrixTable(); } catch (e) {}
+  } catch (e) {}
+});
 // Attempt to fetch enumerate results at startup so the Matrix A column
 // pre-selects known enumerated sources when available.
 window.addEventListener('DOMContentLoaded', async ()=>{
@@ -601,7 +917,7 @@ async function fetchDiagnostics() {
 }
 
 // Wire diagnostics UI actions when DOM ready
-window.addEventListener('DOMContentLoaded', ()=>{
+window.addEventListener('DOMContentLoaded', async ()=>{
   try {
     const diagBtn = document.getElementById('diagnosticsBtn');
     const diagRefresh = document.getElementById('diagnostics-refresh');
@@ -644,11 +960,137 @@ window.addEventListener('DOMContentLoaded', ()=>{
 // Update header X32 IP indicator from /status periodically
 async function pollStatusForHeader() {
   try {
-    const resp = await fetch(apiUrl('/status'));
-    if (!resp.ok) return;
-    const j = await resp.json();
+    // Try current configured origin first
+    let resp;
+    let j = null;
+    try {
+      resp = await fetch(apiUrl('/status'));
+      if (resp && resp.ok) j = await resp.json().catch(()=>null);
+    } catch (e) {
+      // network error contacting configured origin — we'll try fallbacks below
+      resp = null; j = null;
+    }
+    // If the configured origin is unreachable, try a small set of sensible fallbacks
+    if (!resp || !resp.ok) {
+      // Avoid infinite probing when user intentionally configured a custom origin.
+      const tried = new Set();
+      const candidates = [];
+      try {
+        const cfg = getApiOrigin(); if (cfg) candidates.push(cfg);
+      } catch (e) {}
+      // Common local ports to try
+      candidates.push('http://localhost:3000');
+      candidates.push('http://localhost:4000');
+      candidates.push('http://127.0.0.1:3000');
+      candidates.push('http://127.0.0.1:4000');
+
+      let found = null;
+      for (const c of candidates) {
+        if (!c || tried.has(c)) continue;
+        tried.add(c);
+        try {
+          const u = c.replace(/\/$/, '') + '/status';
+          const r = await fetch(u, { cache: 'no-store' });
+          if (r && r.ok) {
+            const parsed = await r.json().catch(()=>null);
+            if (parsed) { found = { origin: c.replace(/\/$/, ''), json: parsed }; break; }
+          }
+        } catch (e) { /* ignore and try next */ }
+      }
+      if (found) {
+        const origin = found.origin;
+        try { localStorage.setItem('dubswitch_api_origin', origin); } catch (e) {}
+        window.__DUBSWITCH_API_ORIGIN__ = origin;
+        j = found.json;
+  // Inform the user that origin was switched; user may need to reload
+  try { showToast('Switched API origin to ' + origin + '. Reload the app to apply.', 4000); } catch (e) {}
+      } else {
+        // No candidate worked — surface a clear preview and stop here
+        try {
+          const preview = document.getElementById('serverStatusPreview');
+          if (preview) preview.textContent = 'Origin: ' + (getApiOrigin() || 'http://localhost:3000') + ' | status: unreachable';
+        } catch (e) {}
+        try { showToast('Local server unreachable at configured origin', 3000); } catch (e) {}
+        return;
+      }
+    }
+    // Update X32 indicator
     const ipEl = document.getElementById('x32-ip-indicator');
     if (ipEl) ipEl.textContent = 'X32: ' + (j && j.x32Ip ? j.x32Ip : '—');
+    // Update local server address shown in header (Local: ip:port)
+    const statusEl = document.getElementById('status');
+    try {
+      // Prefer server-provided network interfaces (ifaces) to find a non-loopback address
+      let localAddr = '';
+      if (j && j.ifaces) {
+        // ifaces is an object mapping iface name -> array of addresses
+        for (const k of Object.keys(j.ifaces)) {
+          const arr = j.ifaces[k] || [];
+          for (const it of arr) {
+            if (!it || !it.address) continue;
+            if (it.internal) continue; // skip loopback
+            // prefer IPv4
+            if (it.family === 'IPv4' || it.family === 4) { localAddr = it.address; break; }
+            if (!localAddr) localAddr = it.address;
+          }
+          if (localAddr) break;
+        }
+      }
+      // Prefer configured API origin (if set) for display so users see which
+      // server the client will target after a port-change. Fallback to
+      // location.host when no override is configured.
+      let displayLocal = '—';
+      const cfgOrigin = getApiOrigin();
+      if (cfgOrigin) {
+        try { displayLocal = (new URL(cfgOrigin)).host; } catch (e) { displayLocal = String(cfgOrigin).replace(/^https?:\/\//, '').replace(/\/$/, ''); }
+      } else {
+        // No configured origin: use detected non-loopback address if available,
+        // otherwise fall back to the current page host:port (useful in dev).
+        if (localAddr) displayLocal = localAddr + (location && location.port ? (':' + location.port) : '');
+        else if (location && location.host) displayLocal = location.host;
+      }
+      if (statusEl) statusEl.textContent = 'Local: ' + displayLocal;
+    } catch (e) {
+      if (statusEl) statusEl.textContent = 'Local: —';
+    }
+  // Also prepopulate the Local Port input so the Save Port field shows the
+    // currently-targeted port. Preference order:
+    // 1) configured API origin (localStorage / runtime override)
+    // 2) current location.port (when served over http(s))
+    // 3) default 3000
+    try {
+      const localPortInput = document.getElementById('localPortInput');
+      if (localPortInput) {
+        let portToShow = '';
+        const cfgOrigin = getApiOrigin();
+        if (cfgOrigin) {
+          try { portToShow = (new URL(cfgOrigin)).port || ''; } catch (e) { portToShow = ''; }
+        }
+        if (!portToShow) {
+          if (location && location.port) portToShow = location.port;
+          else portToShow = '3000';
+        }
+        localPortInput.value = portToShow;
+      }
+    } catch (e) {}
+    // Update one-line Server status preview (if present)
+    try {
+      try {
+        const preview = document.getElementById('serverStatusPreview');
+        if (preview) {
+          const origin = getApiOrigin() || 'http://localhost:3000';
+          const pieces = ['Origin: ' + origin.replace(/^https?:\/\//, '').replace(/\/$/, '')];
+          if (j) {
+            const extras = [];
+            if (typeof j.wsClients !== 'undefined') extras.push('ws=' + j.wsClients);
+            if (typeof j.pingCount !== 'undefined') extras.push('pings=' + j.pingCount);
+            if (j.x32Ip) extras.push('x32=' + j.x32Ip);
+            if (extras.length) pieces.push('status: ' + extras.join(', '));
+          }
+          preview.textContent = pieces.join(' | ');
+        }
+      } catch (e) {}
+    } catch (e) {}
   } catch (e) {}
 }
 // Start polling header status every 5s
@@ -663,12 +1105,15 @@ window.addEventListener('DOMContentLoaded', ()=>{
   try {
     window.statusEl = document.getElementById('status') || window.statusEl || _noopEl();
     window.toggleInputsBtn = document.getElementById('toggle-inputs') || window.toggleInputsBtn || _noopEl();
-    window.routingTable = document.getElementById('routing-table') || window.routingTable || _noopEl();
+  // routing table element removed; initialize hint element if present
+  window.routingTable = window.routingTable || _noopEl();
+  const routingHintEl = document.getElementById('routing-hint');
+  if (routingHintEl) routingHintEl.textContent = 'Per-block controls are available in the header above; use those buttons to toggle blocks.';
     window.userpatchContainer = document.getElementById('userpatch-container') || window.userpatchContainer || _noopEl();
     // Ensure channel names are present for UI rendering
     try { loadChannelNames(); } catch (e) {}
-    // Render routing table now that the DOM element exists
-    try { renderRoutingTable(); } catch (e) { console.warn('renderRoutingTable on DOMContentLoaded failed', e); }
+  // Render routing UI (updates header buttons and badges)
+  try { renderRoutingTable(); } catch (e) { console.warn('renderRoutingTable on DOMContentLoaded failed', e); }
 
     // Wire the routing tab to re-render when the tab becomes active. This
     // ensures the table is fresh and visible when users open Settings -> Routing.
@@ -684,22 +1129,16 @@ window.addEventListener('DOMContentLoaded', ()=>{
         }
       } catch (e) {}
     }
-    // Create WebSocket connection to the same origin so the client can
-    // receive routing, channel_names and clp messages from the server.
+    // Create WebSocket connection to the configured API origin (or current host)
     try {
-      // If running inside Electron/file://, API_ORIGIN will be http://localhost:PORT
-      // so derive WS URL from that origin; otherwise use same-origin WS.
-      try {
-        let wsUrl;
-        if (API_ORIGIN) {
-          const origin = API_ORIGIN.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
-          wsUrl = origin.replace(/\/$/, '');
-        } else {
-          const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-          wsUrl = proto + '//' + location.host;
-        }
-        createWs(wsUrl);
-      } catch (e) { console.warn('createWs failed', e); }
+      let origin = getApiOrigin() || '';
+      let wsUrl = '';
+      if (origin) wsUrl = origin.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:').replace(/\/$/, '');
+      else {
+        const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        wsUrl = proto + '//' + location.host;
+      }
+      createWs(wsUrl);
     } catch (e) { console.warn('createWs failed', e); }
 
     // UI flag: while we are awaiting per-channel CLP replies from the server
@@ -735,9 +1174,89 @@ window.addEventListener('DOMContentLoaded', ()=>{
             if (!ip) { showToast('Enter an IP first'); return; }
             safeSendWs(JSON.stringify({ type: 'set_x32_ip', ip }));
             showToast('X32 IP saved');
+            // Also allow storing a preferred local server port so the client can
+            // target a different port when the default 3000 is occupied.
+            try {
+              const portEl = document.getElementById('localPortInput');
+              if (portEl && portEl.value) {
+                const portVal = String(portEl.value).trim();
+                if (/^\d{2,5}$/.test(portVal)) {
+                  const origin = 'http://localhost:' + portVal;
+                  try { localStorage.setItem('dubswitch_api_origin', origin); } catch (e) {}
+                  window.__DUBSWITCH_API_ORIGIN__ = origin;
+                  showToast('Local API origin set to ' + origin);
+                  try { pollStatusForHeader(); } catch (e) {}
+                } else {
+                  showToast('Invalid port — not saved');
+                }
+              }
+            } catch (e) {}
+            // Separate Save Port button (placed in its own Server tab)
+            try {
+              const savePortBtn = document.getElementById('savePortBtn');
+              if (savePortBtn) {
+                savePortBtn.onclick = async () => {
+                  try {
+                    const portEl = document.getElementById('localPortInput');
+                    if (!portEl || !portEl.value) { showToast('Enter a port first'); return; }
+                    const portVal = String(portEl.value).trim();
+                    if (!/^\d{2,5}$/.test(portVal)) { showToast('Invalid port'); return; }
+                    savePortBtn.disabled = true;
+                    savePortBtn.textContent = 'Saving…';
+                    // Ask currently-running server to rebind
+                    try {
+                      const resp = await fetch(apiUrl('/set-port'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ port: Number(portVal) }) });
+                      const json = await resp.json().catch(()=>null);
+                      if (resp.ok && json && json.ok) {
+                        const origin = 'http://localhost:' + portVal;
+                        try { localStorage.setItem('dubswitch_api_origin', origin); } catch (e) {}
+                        window.__DUBSWITCH_API_ORIGIN__ = origin;
+                              // Longer success toast with an action to reconnect WS immediately
+                              // The action will reconnect the WebSocket and, if the page
+                              // was originally served from a different host:port, will
+                              // navigate the browser to the new origin so the UI is
+                              // loaded from the newly-bound server.
+                              showToast('Port saved. Please restart the application to apply the new port.', 8000);
+                        try { pollStatusForHeader(); } catch (e) {}
+                        // Also auto-reconnect shortly after successful rebind so user sees the change
+                        // No automatic reconnect
+                        // If this page was loaded over http(s) and the host:port differs
+                        // from the newly-bound server, automatically navigate there so
+                        // the UI (assets and location-based logic) are served from
+                        // the new origin. Delay slightly to give the server time to bind.
+                        try {
+                          const currentHost = (location && location.host) ? location.host : '';
+                          const newHost = origin.replace(/^https?:\/\//, '').replace(/\/$/, '');
+                          if (location && location.protocol && location.protocol.indexOf('http') === 0 && currentHost && currentHost !== newHost) {
+                            setTimeout(()=>{
+                              try { window.location.replace(origin + (location.pathname || '/')); } catch(e){}
+                            }, 900);
+                          }
+                        } catch (e) {}
+                      } else {
+                        const msg = (json && json.error) ? json.error : ('HTTP ' + resp.status);
+                        showToast('Failed to change port: ' + msg);
+                      }
+                    } catch (e) { console.error('set-port request failed', e); showToast('Failed to contact server'); }
+                  } finally { try { savePortBtn.disabled = false; savePortBtn.textContent = 'Save Port'; } catch (e){} }
+                };
+              }
+            } catch (e) {}
           } catch (e) { console.error('saveIp failed', e); }
         };
       }
+      // Prefill local port input if stored
+      try {
+        const storedOrigin = (typeof localStorage !== 'undefined') ? localStorage.getItem('dubswitch_api_origin') : null;
+        const localPortInput = document.getElementById('localPortInput');
+        if (localPortInput && storedOrigin) {
+          try {
+            const u = new URL(storedOrigin);
+            localPortInput.value = u.port || '';
+            localPortInput.dataset.orig = storedOrigin;
+          } catch (e) { /* ignore */ }
+        }
+      } catch (e) {}
       // Enumerate button: call server endpoint and show JSON + CSV download
       const enumBtn = document.getElementById('enumerateBtn');
       const enumContainer = document.getElementById('enumerate-results-container');
@@ -831,11 +1350,36 @@ function handleWsMessage(ev) {
         break;
       case 'routing':
         if (Array.isArray(data.values)) {
+          console.debug('[WS] received routing', data.values);
           window.routingState = data.values.slice();
+          // Clear any _blockTogglePending flags for blocks whose routing now matches
+          try {
+            window._blockTogglePending = window._blockTogglePending || [false,false,false,false];
+            for (let i = 0; i < 4; i++) {
+              try {
+                if (window._blockTogglePending[i]) {
+                  // If the new routing equals either localin or userin for that block we can clear pending
+                  const b = (window.blocks && window.blocks[i]) || null;
+                  if (!b) { window._blockTogglePending[i] = false; continue; }
+                  const newVal = Number(window.routingState[i]);
+                  if (newVal === Number(b.localin) || newVal === Number(b.userin)) {
+                    window._blockTogglePending[i] = false;
+                  }
+                }
+              } catch (e) { window._blockTogglePending[i] = false; }
+            }
+          } catch (e) {}
           try { renderRoutingTable(); } catch (e) {}
           try { checkUserIns(); } catch (e) {}
           x32Connected = true;
           hideConnectDialog();
+        }
+        break;
+      case 'blocks':
+        if (Array.isArray(data.blocks)) {
+          // Normalize to expected shape
+          window.blocks = data.blocks.map(b => ({ label: b.label || '', userin: Number(b.userin), localin: Number(b.localin) }));
+          try { renderRoutingTable(); } catch (e) {}
         }
         break;
       case 'channel_names':
@@ -875,6 +1419,7 @@ function handleWsMessage(ev) {
 }
 
 function checkUserIns() {
+  syncGlobals();
   // If we don't have an explicit connection but we already received
   // per-channel userPatches (e.g. after a page reload the server-side
   // cache may still be present), treat that as 'connected enough' so
@@ -965,65 +1510,84 @@ window.addEventListener('DOMContentLoaded',()=>{
   // 'matrix-allow-local-toggle' checkbox removed from UI; no initialization required
 });
 
+// Set a single block's inputs to UserIns (block index 0..3)
+function setBlockToUserIns(blockIdx) {
+  syncGlobals();
+  try {
+    if (!Array.isArray(window.blocks) || !window.blocks[blockIdx]) return;
+    const blk = window.blocks[blockIdx];
+    // Determine current state and toggle
+    const nowLocal = Array.isArray(window.routingState) && Number(window.routingState[blockIdx]) === blk.localin;
+    const target = nowLocal ? blk.userin : blk.localin;
+    // Mark this block as pending (in-flight) so UI shows spinner and disables the button
+    try { window._blockTogglePending = window._blockTogglePending || [false,false,false,false]; window._blockTogglePending[blockIdx] = true; } catch (e) {}
+    try { renderRoutingTable(); } catch (e) {}
+    // Send a block-specific toggle action to the server/X32
+  // Debug log: show exact payload we send
+  try { console.log('[DEBUG] -> WS send toggle_inputs_block', JSON.stringify({ type: 'toggle_inputs_block', block: Number(blockIdx), target: Number(target) })); } catch (e) {}
+  safeSendWs(JSON.stringify({ type: 'toggle_inputs_block', block: Number(blockIdx), target: Number(target) }));
+    // Ask server to refresh routing after a short delay so UI updates
+    setTimeout(()=>safeSendWs(JSON.stringify({ type: 'load_routing' })), 500);
+    // optimistically update local routingState so UI reflects change immediately
+    if (Array.isArray(window.routingState) && window.routingState.length > blockIdx) {
+      window.routingState[blockIdx] = Number(target);
+      try { renderRoutingTable(); } catch (e) {}
+    }
+  } catch (e) { console.error('setBlockToUserIns failed', e); }
+}
+
 function renderRoutingTable(){
-  // Build a cleaner table with badges and clear status
-  // Guard against missing runtime data when running from file:// before
-  // the server has provided blocks/routingState.
+  syncGlobals();
+  // The explicit table was removed — update top quick buttons, global toggle
+  // and badges instead so the UI is not duplicated. If blocks/routingState
+  // are not yet available we skip visual updates.
   if (!Array.isArray(window.blocks) || window.blocks.length === 0) return;
   if (!Array.isArray(window.routingState)) return;
-  let html = `
-    <thead><tr><th>Block</th><th>Current</th></tr></thead>
-    <tbody>
-  `;
-  window.blocks.forEach((b,i)=>{
-    const v = Number(routingState[i]);
-    let txt = '';
-    let badgeClass = 'badge-secondary';
-    if (v === b.userin) {
-      txt = `UserIns ${b.label}`;
-      badgeClass = 'badge-success';
-    } else if (v === b.localin) {
-      txt = `LocalIns ${b.label}`;
-      badgeClass = 'badge-warning';
-    } else if (v === 0 && b.localin !== 0) {
-      txt = `LocalIns ${b.label}`;
-      badgeClass = 'badge-warning';
-    } else if (v >= 1 && v <= 32 && channelNames[v]) {
-      txt = `Other (${v}) — ${channelNames[v]}`;
-      badgeClass = 'badge-info';
-    } else {
-      txt = `Other (${v})`;
-      badgeClass = 'badge-secondary';
+  // Update per-block header buttons (if present)
+  try {
+    for (let i = 0; i < 4; i++) {
+      const btn = document.getElementById('userins-block-' + i);
+      if (!btn) continue;
+      const b = window.blocks[i];
+      // If routingState isn't ready, show pending state
+      const hasRouting = Array.isArray(window.routingState) && window.routingState.length > i && window.routingState[i] != null;
+      btn.disabled = !hasRouting;
+      btn.style.opacity = hasRouting ? 1 : 0.6;
+      btn.style.pointerEvents = hasRouting ? '' : 'none';
+      try { btn.classList.remove('btn-success','btn-warning','btn-outline-light'); } catch (e) {}
+      if (!hasRouting) {
+        // show neutral pending label in the badge span
+        try { btn.classList.remove('btn-success','btn-warning'); } catch (e) {}
+        btn.classList.add('btn-outline-light');
+        const badge = btn.querySelector('.btn-badge');
+        if (badge) { badge.innerHTML = `<span class="badge" style="background:#6b7280;color:#fff;margin-left:6px">…</span>`; }
+        btn.title = `Block ${b.label} status pending — waiting for device`;
+      } else {
+        const isLocal = Number(window.routingState[i]) === b.localin;
+        const pending = (window._blockTogglePending && window._blockTogglePending[i]);
+        try { btn.classList.remove('btn-success','btn-warning','btn-outline-light'); } catch (e) {}
+        if (pending) {
+          // show spinner and disabled look
+          btn.disabled = true;
+          btn.style.pointerEvents = 'none';
+          btn.classList.add('btn-outline-light');
+          const badge = btn.querySelector('.btn-badge');
+          if (badge) { badge.innerHTML = `<span class="btn-spinner" aria-hidden="true" style="margin-left:8px"></span>`; }
+          btn.title = `Block ${b.label} toggle pending…`;
+        } else if (isLocal) {
+          btn.classList.add('btn-warning');
+          const badge = btn.querySelector('.btn-badge');
+          if (badge) { badge.innerHTML = `<span class="badge" style="background:#ffae42;color:#111;margin-left:6px">LocalIns</span>`; }
+          btn.title = `Block ${b.label} is LocalIns — click to set UserIns`;
+        } else {
+          btn.classList.add('btn-success');
+          const badge = btn.querySelector('.btn-badge');
+          if (badge) { badge.innerHTML = `<span class="badge" style="background:#2f855a;color:#fff;margin-left:6px">UserIns</span>`; }
+          btn.title = `Block ${b.label} is UserIns — click to set LocalIns`;
+        }
+      }
     }
-    // Add inline toggle control to flip this block between Local and User
-    const toggleId = `blk-toggle-${i}`;
-    const toggleBtn = `<button id="${toggleId}" class="btn btn-sm btn-outline-light" data-block="${i}">Toggle</button>`;
-    html += `<tr><td>${b.label}</td><td><span class="badge ${badgeClass}">${txt}</span></td><td style="width:110px">${toggleBtn}</td></tr>`;
-  });
-  html += `</tbody>`;
-  routingTable.innerHTML = html;
-  // Wire inline block toggles — always enabled so user can flip a block back and forth
-  window.blocks.forEach((b,i)=>{
-    const id = `blk-toggle-${i}`;
-    const el = document.getElementById(id);
-    if(el){
-      const isLocal = Number(routingState[i]) === b.localin;
-      // Label shows the action that will be taken when clicked
-      el.disabled = false;
-      el.style.opacity = 1;
-      el.style.pointerEvents = '';
-      el.textContent = isLocal ? 'Set UserIns' : 'Set LocalIns';
-      el.onclick = () => {
-        // flip this block's state
-        const nowLocal = Number(routingState[i]) === b.localin;
-        routingState[i] = nowLocal ? b.userin : b.localin;
-        // notify server about the toggle for that block
-        safeSendWs(JSON.stringify({type:'toggle_inputs_block',block:i,target:routingState[i]}));
-        // reload UI
-        renderRoutingTable();
-      };
-    }
-  });
+  } catch (e) {}
   // Update toggle button appearance and enable it
   const allLocal = routingState.every((v,i)=>Number(v)===blocks[i].localin);
   toggleInputsBtn.classList.toggle('local', allLocal);
@@ -1050,7 +1614,8 @@ function toggleAllInputs() {
 }
 
 // Lightweight toast helper to show temporary confirmations
-function showToast(msg, timeoutMs = 1800) {
+// Toast helper with optional action button: showToast(message, timeoutMs, actionLabel, actionCallback)
+function showToast(msg, timeoutMs = 1800, actionLabel = null, actionCallback = null) {
   try {
     let container = document.getElementById('toast-container');
     if (!container) {
@@ -1060,7 +1625,16 @@ function showToast(msg, timeoutMs = 1800) {
     }
     const t = document.createElement('div');
     t.className = 'dubswitch-toast';
-    t.textContent = msg;
+    const text = document.createElement('span'); text.textContent = msg;
+    t.appendChild(text);
+    if (actionLabel && typeof actionCallback === 'function') {
+      const btn = document.createElement('button');
+      btn.className = 'btn btn-sm btn-outline-light';
+      btn.style.marginLeft = '10px';
+      btn.textContent = actionLabel;
+      btn.onclick = function(e){ try { actionCallback(e); } catch (ex) { console.error('toast action failed', ex); } };
+      t.appendChild(btn);
+    }
     container.appendChild(t);
     // animate in via class
     requestAnimationFrame(()=> t.classList.add('show'));
@@ -1069,6 +1643,26 @@ function showToast(msg, timeoutMs = 1800) {
       setTimeout(()=>{ try{ container.removeChild(t); }catch(e){} }, 240);
     }, timeoutMs);
   } catch (e) { console.error('showToast failed', e); }
+}
+
+// Attempt to gracefully reconnect the WebSocket using current API origin
+// reconnectWs removed — the app uses the configured origin and expects a restart when port changes
+
+// Simple undo stack for UI-only bulk operations (keeps last snapshot only)
+window.__matrixUndoStack = window.__matrixUndoStack || [];
+
+function pushMatrixUndo(snapshot) {
+  try {
+    // Keep only one-level undo for simplicity
+    window.__matrixUndoStack = [snapshot];
+  } catch (e) {}
+}
+
+function popMatrixUndo() {
+  try {
+    const s = (window.__matrixUndoStack && window.__matrixUndoStack.length) ? window.__matrixUndoStack.pop() : null;
+    return s;
+  } catch (e) { return null; }
 }
 
 // Enhance toggleAllInputs to show a confirmation and disable the button while
@@ -1125,6 +1719,7 @@ function toggleAllInputs() {
 // (closeAllPanels removed — modal has its own tabs now)
 
 function renderUserPatches(){
+  syncGlobals();
   // Ensure channelMatrix initialized from current toggleMatrix so runtime buttons follow settings
   initChannelMatrixFromBlocks();
   let html="";
@@ -1279,7 +1874,7 @@ function sendCustomOSC() {
     const addrEl = document.getElementById('clp-address');
     const argsEl = document.getElementById('clp-args');
     if (!addrEl) return;
-    const address = addrEl.value || '';
+  const address = (addrEl.value || '').trim();
     const argsRaw = (argsEl && argsEl.value) ? argsEl.value.trim() : '';
     const args = [];
     if (argsRaw.length) {
@@ -1295,8 +1890,9 @@ function sendCustomOSC() {
         }
       }
     }
-    console.log('CLP sending from UI:', address, args);
-    safeSendWs(JSON.stringify({ type: 'clp', address, args }));
+  if (!address || address[0] !== '/') { showToast('Invalid OSC address (must start with /)'); return; }
+  console.log('CLP sending from UI:', address, args);
+  safeSendWs(JSON.stringify({ type: 'clp', address, args }));
     // small UX feedback
     showToast('OSC sent');
   } catch (e) { console.error('sendCustomOSC failed', e); }

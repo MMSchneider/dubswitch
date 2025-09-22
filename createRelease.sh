@@ -285,23 +285,10 @@ EOF
 					[ -f README.md ] && cp README.md "$(pwd)/dist/dubswitch-linux-x64-tmp/Dubswitch/"
 					(cd "$(pwd)/dist/dubswitch-linux-x64-tmp" && zip -r "$dist_dir/dubswitch-linux-x64-$tag.zip" Dubswitch)
 					rm -rf "$(pwd)/dist/dubswitch-linux-x64-tmp"
-					 # Create .deb package for Linux Mint/Ubuntu/Debian
-					 if ! command -v electron-installer-debian >/dev/null 2>&1; then
-						 echo "electron-installer-debian not found, installing..."
-						 npm install -g electron-installer-debian
-					 fi
-					 mkdir -p "$(pwd)/deb-tmp"
-											   electron-installer-debian \
-												   --src "$(pwd)/dist/dubswitch-linux-x64/" \
-													 --dest "$(pwd)/deb-tmp" \
-													 --arch amd64 \
-													 --options.version=$tag \
-													 --options.name=x32-router \
-													 --options.maintainer="Mike Schneider <info@dubmajor.de>" \
-													 --options.description="X32/M32 Input & User-Patch Router with OSC and Web UI. Control and route X32/M32 mixer channels from your desktop."
-					 # Move .deb to release folder and clean up temp
-					 mv "$(pwd)/deb-tmp"/*.deb "$dist_dir/"
-					 rm -rf "$(pwd)/deb-tmp"
+			 # (linux-x64) NOTE: create only the ZIP (mirror linux-arm64 behaviour)
+			 # The .deb creation step requires fakeroot/dpkg and is platform
+			 # specific; to keep parity with linux-arm64 we skip .deb here.
+
 			;;
 	esac
 done
