@@ -221,9 +221,16 @@ app.whenReady().then(async () => {
   if (isDev) {
     createWindow();
   } else {
-    // Start and supervise the server as a child process so we can restart it
-    // cleanly when it exits (for example after a port change request).
-    startServerProcess();
+    // Start and supervise the server as a child process when no external
+    // server is already running. If an external process (developer or user)
+    // is already listening on the configured port we avoid spawning a
+    // supervised child to prevent EADDRINUSE errors and UDP port conflicts.
+    const alreadyRunning = await waitForServer(SERVER_PORT, { attempts: 3, delay: 200 });
+    if (alreadyRunning) {
+      console.log(`Detected existing server on port ${SERVER_PORT}; skipping supervised spawn.`);
+    } else {
+      startServerProcess();
+    }
     // Wait for server to be ready before creating the window (but don't block forever)
     const ok = await waitForServer(SERVER_PORT, { attempts: 40, delay: 200 });
     if (!ok) console.warn('Timed out waiting for local server to start; creating window anyway.');
