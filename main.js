@@ -43,10 +43,15 @@ function startServerProcess() {
   // a plain Node runtime for the spawned process.
   const env = Object.assign({}, process.env, { ELECTRON_RUN_AS_NODE: '1' });
     // Keep working dir stable
-    serverProc = spawn(node, args, { cwd: process.cwd(), env, stdio: ['ignore', 'pipe', 'pipe'] });
+  // Use the Electron userData directory for working dir and logs so the
+  // packaged app does not attempt to write into the bundle or a read-only
+  // root filesystem. app.getPath('userData') is per-user and writable.
+  const DATA_DIR = app.getPath && typeof app.getPath === 'function' ? app.getPath('userData') : process.cwd();
+  try { if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) { /* ignore */ }
+  serverProc = spawn(node, args, { cwd: DATA_DIR, env, stdio: ['ignore', 'pipe', 'pipe'] });
     // Setup persistent log file for the child process with a minimal rotation
-    try {
-      const LOG_PATH = path.join(process.cwd(), 'server_child.log');
+  try {
+  const LOG_PATH = path.join(DATA_DIR, 'server_child.log');
       const MAX_BYTES = 5 * 1024 * 1024; // 5MB
       try {
         if (fs.existsSync(LOG_PATH) && fs.statSync(LOG_PATH).size > MAX_BYTES) {
