@@ -36,7 +36,12 @@ function startServerProcess() {
     const node = process.execPath;
     const serverScript = path.join(__dirname, 'server.js');
     const args = [serverScript];
-    const env = Object.assign({}, process.env);
+  // When running packaged under Electron, process.execPath points at the
+  // electron binary. In that case we must instruct the electron binary to
+  // run the child script in 'node' mode to avoid launching a second GUI
+  // instance. Setting ELECTRON_RUN_AS_NODE=1 makes Electron behave like
+  // a plain Node runtime for the spawned process.
+  const env = Object.assign({}, process.env, { ELECTRON_RUN_AS_NODE: '1' });
     // Keep working dir stable
     serverProc = spawn(node, args, { cwd: process.cwd(), env, stdio: ['ignore', 'pipe', 'pipe'] });
     // Setup persistent log file for the child process with a minimal rotation
