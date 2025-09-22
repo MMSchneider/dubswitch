@@ -1,5 +1,4 @@
 # dubswitch — X32 Channel & User-Patch Router
-# Dubswitch - X32 Channel & User-Patch Router
 
 <p align="center">
   <img src="docs/images/mainWindowV001.png" alt="DubSwitch Main Window" width="600">
