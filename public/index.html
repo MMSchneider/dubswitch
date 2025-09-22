@@ -433,15 +433,21 @@
       var bootstrapCdn = 'https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js';
       var localBootstrapBundle = 'vendor/bootstrap.bundle.min.js';
 
+      // Helper to load the app script after vendors are ready
+      function loadApp(){
+        // Insert the main app script (deferred) so it runs after vendor scripts
+        insertScript('app.js');
+      }
+
       // Load bootstrap (prefer CDN) — called only after jQuery is available or attempted
       function loadBootstrapBundle(){
-        insertScript(bootstrapCdn, function(){}, function(){ insertScript(localBootstrapBundle); });
+        insertScript(bootstrapCdn, function(){ loadApp(); }, function(){ insertScript(localBootstrapBundle, loadApp); });
       }
 
       try {
         if (location.protocol === 'file:'){
-          // Packaged/offline: load local vendor files in sequence
-          insertScript(localJq, function(){ insertScript(localBootstrapBundle); }, function(){ console.warn('Local jQuery failed to load'); insertScript(localBootstrapBundle); });
+          // Packaged/offline: load local vendor files in sequence, then the app
+          insertScript(localJq, function(){ insertScript(localBootstrapBundle, loadApp); }, function(){ console.warn('Local jQuery failed to load'); insertScript(localBootstrapBundle, loadApp); });
         } else {
           // Web context: load jQuery first, then bootstrap. Fallback to local jQuery when CDN fails.
           insertScript(jqueryCdn, function(){
@@ -469,7 +475,7 @@
       } catch (e) {}
     })();
   </script>
-  <script src="app.js"></script>
+  <!-- app.js is loaded dynamically after vendor scripts to ensure jQuery/bootstrap are available -->
   <!-- Server log modal -->
   <div class="modal fade" id="serverLogModal" tabindex="-1" role="dialog" aria-labelledby="serverLogModalLabel" aria-hidden="true">
     <div class="modal-dialog modal-lg" role="document">
