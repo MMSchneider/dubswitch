@@ -1164,6 +1164,33 @@ async function pollStatusForHeader() {
 // Start polling header status every 5s
 try { pollStatusForHeader(); setInterval(pollStatusForHeader, 5000); } catch (e) {}
 
+// Populate version labels (header and footer) from /version
+(function setupVersionLabels(){
+  async function updateVersionOnce() {
+    try {
+      const r = await fetch(apiUrl('/version'), { cache: 'no-store' });
+      if (!r.ok) throw new Error('HTTP ' + r.status);
+      const ver = (await r.text()).trim();
+      if (ver) {
+        const hdr = document.getElementById('header-version');
+        if (hdr && !/v\d/.test(hdr.textContent || '')) hdr.textContent = 'v' + ver;
+        const ftr = document.getElementById('app-version');
+        if (ftr && !/v\d/.test(ftr.textContent || '')) ftr.textContent = 'v' + ver + ' — ';
+      }
+    } catch (e) {
+      // keep quiet; maybe server not up yet — retry shortly
+      try { dbg('updateVersionOnce failed:', e && e.message); } catch(_){}
+    }
+  }
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', updateVersionOnce, { once: true });
+  } else {
+    updateVersionOnce();
+  }
+  // Also attempt one delayed retry after 2s in case server started later
+  setTimeout(updateVersionOnce, 2000);
+})();
+
 // Rebind important DOM elements once the DOM is ready and render routing
 // table so it appears in the correct tab. Previously these globals were
 // initialized before DOMContentLoaded which could leave them as noop
