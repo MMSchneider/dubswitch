@@ -14,7 +14,29 @@
   server remains the central authority for device communication and
   persistence.
 */
-const SERVER_PORT = process.env.PORT || 3000;
+// Resolve persisted port file path within Electron's userData so writes are allowed
+let PERSIST_FILE = null;
+try {
+  // app.getPath('userData') is available after app module is loaded
+  PERSIST_FILE = require('path').join(app.getPath('userData'), 'server.port');
+} catch (e) { /* fallback below */ }
+
+// Read persisted port from userData if present; otherwise fall back to env or default
+function readPersistedPort(defaultPort) {
+  try {
+    const fs = require('fs'); const path = require('path');
+    const dir = app.getPath('userData');
+    const file = path.join(dir, 'server.port');
+    if (fs.existsSync(file)) {
+      const txt = fs.readFileSync(file, 'utf8').trim();
+      const n = Number(txt || ''); if (n && n > 0 && n <= 65535) return n;
+    }
+  } catch (_) {}
+  const nEnv = Number(process.env.PORT || '') || null; if (nEnv) return nEnv;
+  return defaultPort;
+}
+
+let SERVER_PORT = readPersistedPort(3000);
 const { app, BrowserWindow, Menu, ipcMain } = require('electron');
 const fs = require('fs');
 const path = require('path');
@@ -41,7 +63,12 @@ function startServerProcess() {
   // run the child script in 'node' mode to avoid launching a second GUI
   // instance. Setting ELECTRON_RUN_AS_NODE=1 makes Electron behave like
   // a plain Node runtime for the spawned process.
-  const env = Object.assign({}, process.env, { ELECTRON_RUN_AS_NODE: '1' });
+  // Instruct the child server where to keep the persisted port file
+  const env = Object.assign({}, process.env, {
+    ELECTRON_RUN_AS_NODE: '1',
+    PORT: String(SERVER_PORT),
+    DUBSWITCH_PORT_FILE: PERSIST_FILE || path.join(app.getPath('userData'), 'server.port')
+  });
     // Keep working dir stable
   // Use the Electron userData directory for working dir and logs so the
   // packaged app does not attempt to write into the bundle or a read-only
@@ -117,6 +144,8 @@ function createWindow() {
   // If running in dev mode, use local server; otherwise, load the packaged index.html
   const isDev = process.env.NODE_ENV === 'development' || process.env.ELECTRON_DEV === 'true';
   if (isDev) {
+    // Re-read persisted port in case it was changed before window creation
+    SERVER_PORT = readPersistedPort(SERVER_PORT || 3000);
     win.loadURL(`http://localhost:${SERVER_PORT}`);
   } else {
     win.loadFile(path.join(__dirname, 'public', 'index.html'));
@@ -219,20 +248,23 @@ app.whenReady().then(async () => {
   setupMenu();
   const isDev = process.env.NODE_ENV === 'development' || process.env.ELECTRON_DEV === 'true';
   if (isDev) {
+    // Ensure we wait on correct port (from persisted file or env)
+    SERVER_PORT = readPersistedPort(SERVER_PORT || 3000);
     createWindow();
   } else {
     // Start and supervise the server as a child process when no external
     // server is already running. If an external process (developer or user)
     // is already listening on the configured port we avoid spawning a
     // supervised child to prevent EADDRINUSE errors and UDP port conflicts.
-    const alreadyRunning = await waitForServer(SERVER_PORT, { attempts: 3, delay: 200 });
+  SERVER_PORT = readPersistedPort(SERVER_PORT || 3000);
+  const alreadyRunning = await waitForServer(SERVER_PORT, { attempts: 3, delay: 200 });
     if (alreadyRunning) {
       console.log(`Detected existing server on port ${SERVER_PORT}; skipping supervised spawn.`);
     } else {
       startServerProcess();
     }
     // Wait for server to be ready before creating the window (but don't block forever)
-    const ok = await waitForServer(SERVER_PORT, { attempts: 40, delay: 200 });
+  const ok = await waitForServer(SERVER_PORT, { attempts: 40, delay: 200 });
     if (!ok) console.warn('Timed out waiting for local server to start; creating window anyway.');
     const win = createWindow();
     // Ensure title is preserved after renderer loads
@@ -262,6 +294,18 @@ try {
     }
   });
 } catch (e) { /* ignore when not running under Electron */ }
+
+// IPC: quit application without relaunch (used after port change per UX)
+try {
+  ipcMain.handle('quit-app', async () => {
+    try {
+      setTimeout(() => { try { app.exit(0); } catch (e) { process.exit(0); } }, 50);
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: (e && e.message) || String(e) };
+    }
+  });
+} catch (e) { /* ignore */ }
 
 // IPC to restart only the supervised server process (used by the renderer Save Port flow)
 try {

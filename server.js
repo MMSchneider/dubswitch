@@ -107,7 +107,10 @@ try {
 } catch (e) { console.warn('Failed to read existing matrix.json:', e && e.message); persistedMatrix = {}; }
 
 // Persisted HTTP port file (simple text file containing port number)
-const PORT_PERSIST_PATH = path.join(__dirname, 'server.port');
+// In packaged app, Electron main passes DUBSWITCH_PORT_FILE pointing
+// to app.getPath('userData')/server.port so we can write to a writable
+// location. In dev, fall back to the repo directory.
+const PORT_PERSIST_PATH = process.env.DUBSWITCH_PORT_FILE || path.join(__dirname, 'server.port');
 let persistedPort = null;
 try {
   if (fs.existsSync(PORT_PERSIST_PATH)) {
