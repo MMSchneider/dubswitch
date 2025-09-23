@@ -406,14 +406,120 @@ var colorMap = window.colorMap || { null: 'transparent' };
               updateServerStatusUI();
               setInterval(updateServerStatusUI, 5000);
             } catch (e) {}
-function setAllUserPatchesCard() {
-  // Set all channels to DAW (example offset 128+ch)
+// Apply A mapping to all channels
+function setAllUserPatchesLocal() {
   try {
-    for (let ch = 1; ch <= 32; ch++) { window.userPatches[ch] = 128 + ch; }
-    safeSendWs(JSON.stringify({ type: 'toggle_inputs', targets: (window.blocks||[]).map(b => b.userin || 0) }));
+    // Snapshot previous values for undo
+    const snapshot = {};
+    const updates = [];
+    for (let ch = 1; ch <= 32; ch++) {
+      const nn = String(ch).padStart(2, '0');
+      const prev = window.userPatches && window.userPatches[ch];
+      snapshot[nn] = (prev != null && Number.isFinite(Number(prev))) ? Number(prev) : null;
+    }
+    for (let ch = 1; ch <= 32; ch++) {
+      const nn = String(ch).padStart(2, '0');
+      let aVal = null;
+      // Prefer server-persisted numeric A value
+      const persisted = (window._persistedMatrix && window._persistedMatrix[nn]) ? window._persistedMatrix[nn] : null;
+      if (persisted && persisted.a != null && !Number.isNaN(Number(persisted.a))) {
+        aVal = Number(persisted.a);
+      } else {
+        // Fallback: compute from current channelMatrix mapping
+        const mapping = channelMatrix[ch] || { aAction: 'LocalIns', param: null };
+        aVal = computeValueForAction(ch, mapping.aAction, mapping.param);
+      }
+      if (Number.isFinite(aVal)) {
+        window.userPatches[ch] = aVal;
+        updates.push({ nn, val: aVal });
+      }
+    }
+    // Push undo snapshot
+    try { pushMatrixUndo(snapshot); } catch (e) {}
+    // Send CLP updates
+    for (const u of updates) {
+      safeSendWs(JSON.stringify({ type: 'clp', address: `/config/userrout/in/${u.nn}`, args: [u.val] }));
+    }
     if (typeof renderUserPatches === 'function') renderUserPatches();
-    try { renderStaticMatrixTable(); if (window.persistCurrentMatrix) window.persistCurrentMatrix(); } catch (e) {}
-  } catch (e) { console.error('setAllUserPatchesCard failed', e); }
+    showToast('Applied A mapping to all channels', 5000, 'Undo', () => {
+      try {
+        const prev = popMatrixUndo();
+        if (!prev) { showToast('Nothing to undo'); return; }
+        const undos = [];
+        for (let ch = 1; ch <= 32; ch++) {
+          const nn = String(ch).padStart(2, '0');
+          const v = prev[nn];
+          if (v != null && Number.isFinite(Number(v))) {
+            window.userPatches[ch] = Number(v);
+            undos.push({ nn, val: Number(v) });
+          }
+        }
+        for (const u of undos) {
+          safeSendWs(JSON.stringify({ type: 'clp', address: `/config/userrout/in/${u.nn}`, args: [u.val] }));
+        }
+        if (typeof renderUserPatches === 'function') renderUserPatches();
+        showToast('Undo applied');
+      } catch (e) { console.error('Undo failed', e); showToast('Undo failed'); }
+    });
+  } catch (e) { console.error('setAllUserPatchesLocal failed', e); showToast('Failed to apply A to all'); }
+}
+
+// Apply B mapping to all channels
+function setAllUserPatchesCard() {
+  try {
+    // Snapshot previous values for undo
+    const snapshot = {};
+    const updates = [];
+    for (let ch = 1; ch <= 32; ch++) {
+      const nn = String(ch).padStart(2, '0');
+      const prev = window.userPatches && window.userPatches[ch];
+      snapshot[nn] = (prev != null && Number.isFinite(Number(prev))) ? Number(prev) : null;
+    }
+    for (let ch = 1; ch <= 32; ch++) {
+      const nn = String(ch).padStart(2, '0');
+      let bVal = null;
+      // Prefer server-persisted numeric B value
+      const persisted = (window._persistedMatrix && window._persistedMatrix[nn]) ? window._persistedMatrix[nn] : null;
+      if (persisted && persisted.b != null && !Number.isNaN(Number(persisted.b))) {
+        bVal = Number(persisted.b);
+      } else {
+        // Fallback: compute from current channelMatrix mapping
+        const mapping = channelMatrix[ch] || { bAction: 'DAW', param: null };
+        bVal = computeValueForAction(ch, mapping.bAction, mapping.param);
+      }
+      if (Number.isFinite(bVal)) {
+        window.userPatches[ch] = bVal;
+        updates.push({ nn, val: bVal });
+      }
+    }
+    // Push undo snapshot
+    try { pushMatrixUndo(snapshot); } catch (e) {}
+    // Send CLP updates
+    for (const u of updates) {
+      safeSendWs(JSON.stringify({ type: 'clp', address: `/config/userrout/in/${u.nn}`, args: [u.val] }));
+    }
+    if (typeof renderUserPatches === 'function') renderUserPatches();
+    showToast('Applied B mapping to all channels', 5000, 'Undo', () => {
+      try {
+        const prev = popMatrixUndo();
+        if (!prev) { showToast('Nothing to undo'); return; }
+        const undos = [];
+        for (let ch = 1; ch <= 32; ch++) {
+          const nn = String(ch).padStart(2, '0');
+          const v = prev[nn];
+          if (v != null && Number.isFinite(Number(v))) {
+            window.userPatches[ch] = Number(v);
+            undos.push({ nn, val: Number(v) });
+          }
+        }
+        for (const u of undos) {
+          safeSendWs(JSON.stringify({ type: 'clp', address: `/config/userrout/in/${u.nn}`, args: [u.val] }));
+        }
+        if (typeof renderUserPatches === 'function') renderUserPatches();
+        showToast('Undo applied');
+      } catch (e) { console.error('Undo failed', e); showToast('Undo failed'); }
+    });
+  } catch (e) { console.error('setAllUserPatchesCard failed', e); showToast('Failed to apply B to all'); }
 }
 
 // Dev-only larger shims: populate sensible defaults for local dev/testing
