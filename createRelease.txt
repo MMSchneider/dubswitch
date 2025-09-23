@@ -32,3 +32,24 @@ zip -r dubswitch-linux-arm64.zip dist/dubswitch-linux-arm64
 
 chmod +x createRelease.sh
 ./createRelease.sh
+
+4. Building Linux .deb packages (optional)
+
+- The release script now tries to build native Debian packages (.deb) for linux-x64 and linux-arm64 in addition to the ZIPs.
+- Prerequisites:
+	- On macOS: Install Docker Desktop and keep it running. The script will use Docker to cross-build Linux .deb packages.
+		- If Docker Desktop is installed but not running, the script will try to start it automatically and will stop it again after .deb files are produced.
+	- On Linux: Ensure dpkg (dpkg-deb) and fakeroot are installed. Example (Debian/Ubuntu):
+		- sudo apt-get update
+		- sudo apt-get install -y dpkg-dev fakeroot
+	- electron-builder: The script will attempt to install electron-builder globally if not found. If you prefer local:
+		- npm install --save-dev electron-builder
+		- Then it will use npx electron-builder automatically.
+
+Outputs:
+- All artifacts are written to dist-release-<version>/
+- Example files:
+	- dubswitch-linux-x64-<version>.zip
+	- dubswitch-linux-arm64-<version>.zip
+	- dubswitch-x64-<version>.deb (on macOS with Docker or on Linux)
+	- dubswitch-arm64-<version>.deb (on macOS with Docker or on Linux)
