@@ -188,8 +188,18 @@ function setConnectedStatus(x32Ip) {
     const el = document.getElementById('x32-ip-indicator') || window.x32IpIndicator || null;
     if (el) el.textContent = 'X32: ' + ip;
     const statusElLocal = document.getElementById('status') || window.statusEl || null;
-    if (statusElLocal) statusElLocal.textContent = 'Local: ' + (getApiOrigin() || (location && location.host) || '—');
-    dbg('setConnectedStatus -> X32:', ip, '| Local:', (getApiOrigin() || (location && location.host) || '—'));
+    // Prefer the last detected non-loopback IP combined with the configured/known port
+    let port = '3000';
+    try {
+      const cfgOrigin = getApiOrigin();
+      if (cfgOrigin) { try { port = (new URL(cfgOrigin)).port || port; } catch (e) {} }
+      else if (location && location.port) { port = location.port; }
+    } catch (e) {}
+    const ipHost = (window.lastLocalIp && typeof window.lastLocalIp === 'string') ? window.lastLocalIp : null;
+    const localDisplay = ipHost ? (ipHost + (port ? (':' + port) : ''))
+                                : ((location && location.host) || '—');
+    if (statusElLocal) statusElLocal.textContent = 'Local: ' + localDisplay;
+    dbg('setConnectedStatus -> X32:', ip, '| Local:', localDisplay);
   } catch (e) { console.warn('setConnectedStatus failed', e); }
 }
 
@@ -1094,19 +1104,19 @@ async function pollStatusForHeader() {
           if (localAddr) break;
         }
       }
-      // Prefer configured API origin (if set) for display so users see which
-      // server the client will target after a port-change. Fallback to
-      // location.host when no override is configured.
+      // Determine port we should show
+      let portToShow = '3000';
+      try {
+        const cfgOrigin = getApiOrigin();
+        if (cfgOrigin) { try { portToShow = (new URL(cfgOrigin)).port || portToShow; } catch (e) {} }
+        else if (location && location.port) { portToShow = location.port; }
+      } catch (e) {}
+      // Prefer the real IP when available; otherwise fall back to host
       let displayLocal = '—';
-      const cfgOrigin = getApiOrigin();
-      if (cfgOrigin) {
-        try { displayLocal = (new URL(cfgOrigin)).host; } catch (e) { displayLocal = String(cfgOrigin).replace(/^https?:\/\//, '').replace(/\/$/, ''); }
-      } else {
-        // No configured origin: use detected non-loopback address if available,
-        // otherwise fall back to the current page host:port (useful in dev).
-        if (localAddr) displayLocal = localAddr + (location && location.port ? (':' + location.port) : '');
-        else if (location && location.host) displayLocal = location.host;
-      }
+      if (localAddr) displayLocal = localAddr + (portToShow ? (':' + portToShow) : '');
+      else if (location && location.host) displayLocal = location.host;
+      // Persist last known values for other updaters (e.g., setConnectedStatus)
+      try { window.lastLocalIp = localAddr || window.lastLocalIp || null; window.lastLocalPort = portToShow; } catch (e) {}
       if (statusEl) statusEl.textContent = 'Local: ' + displayLocal;
     } catch (e) {
       if (statusEl) statusEl.textContent = 'Local: —';
