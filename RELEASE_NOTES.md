@@ -156,3 +156,36 @@ Release date: 2025-09-23
 ## Suggested commit message
 
 "chore(release): v0.1.1 — WS init + UI wiring fixes, matrix render reliability, real IP in header\n\n- add late-load WS and modal fallbacks; wire Diagnostics actions\n- render Matrix on tab activation and late load; persist and preselect\n- show machine IP:port in header; bump version to 0.1.1"
+
+<!-- appended v0.1.2 release notes -->
+
+# Release v0.1.2 — All A/B bulk apply, Undo, and footer version
+
+Release date: 2025-09-23
+
+## Highlights
+
+- Rename “Local” / “Card” to “All A” / “All B” and make them apply the A/B mapping from the Matrix to all channels.
+- One-click Undo for both bulk actions (restores previous per-channel values and resends CLP).
+- Footer shows the running app version inline before “Made …”; header version populated too.
+
+## Changes
+
+- public/index.html
+  - Button labels updated to “All A” and “All B” with clearer titles/tooltips.
+  - Footer now includes a span for the app version.
+- public/app.js
+  - setAllUserPatchesLocal(): apply A mapping to all channels using persisted matrix when available, else compute from channelMatrix; batch CLP sends; Undo supported.
+  - setAllUserPatchesCard(): same for B mapping; Undo supported.
+  - setupVersionLabels(): populates header/footer version from /version using apiUrl() with a retry.
+
+## Verify
+
+1. Start the server and open the app.
+2. Click “All A” — all channels switch to their A mapping; click Undo in the toast to revert.
+3. Click “All B” — all channels switch to their B mapping; click Undo to revert.
+4. Footer shows “vX.Y.Z — Made …”; header shows the same version.
+
+## Suggested commit message
+
+"chore(release): v0.1.2 — All A/B bulk apply with Undo, footer version\n\n- rename bulk buttons and wire to matrix A/B mapping (persisted or computed)\n- add undo snapshot for both bulk actions; resend CLP to restore\n- display app version in header and inline in footer"
