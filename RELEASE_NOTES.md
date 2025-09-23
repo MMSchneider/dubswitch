@@ -63,7 +63,7 @@ ls -la dist-release-0.0.1
 3. Verify Windows ZIP contains runtime files:
 
 ```bash
-unzip -l dist-release-0.0.1/dubswitch-win-x64-0.0.1.zip | grep -E 'x32-router|\.dll|locales|resources|app.asar.unpacked'
+unzip -l dist-release-0.0.1/dubswitch-win-x64-0.0.1.zip | grep -E 'dubswitch|\.dll|locales|resources|app.asar.unpacked'
 ```
 
 4. On mac: expand the mac zip and verify `.app/Contents/Resources/app` contains `resources/` and `public/vendor`.

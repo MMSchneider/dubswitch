@@ -19,16 +19,16 @@ npm run package-linux-arm
 3. Zip it
 
 # macOS Intel (x64)
-zip -r x32-router-mac-x64.zip dist/x32-router-darwin-x64
+zip -r dubswitch-mac-x64.zip dist/dubswitch-darwin-x64
 
 # macOS Silicon (arm64)
-zip -r x32-router-mac-arm64.zip dist/x32-router-darwin-arm64
+zip -r dubswitch-mac-arm64.zip dist/dubswitch-darwin-arm64
 
 # Windows (x64)
-zip -r x32-router-win-x64.zip dist/x32-router-win32-x64
+zip -r dubswitch-win-x64.zip dist/dubswitch-win32-x64
 
 # Raspberry Pi/Linux ARM (arm64)
-zip -r x32-router-linux-arm64.zip dist/x32-router-linux-arm64
+zip -r dubswitch-linux-arm64.zip dist/dubswitch-linux-arm64
 
 chmod +x createRelease.sh
 ./createRelease.sh

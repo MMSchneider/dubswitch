@@ -52,7 +52,7 @@ for platform in "${selected_platforms[@]}"; do
 		mac-x64)
 			   npx electron-packager . dubswitch --platform=darwin --arch=x64 --out="$(pwd)/dist/" \
 			   --icon=resources/dubswitch.icns \
-			   --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
+		   --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|dubswitch-.*" --overwrite
 			# Ensure required files are present in the packaged app
 			   cp package.json "$(pwd)/dist/dubswitch-darwin-x64/"
 			   cp main.js "$(pwd)/dist/dubswitch-darwin-x64/"
@@ -73,7 +73,7 @@ for platform in "${selected_platforms[@]}"; do
 		mac-arm64)
 			   npx electron-packager . dubswitch --platform=darwin --arch=arm64 --out="$(pwd)/dist/" \
 			   --icon=resources/dubswitch.icns \
-			   --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
+		   --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|dubswitch-.*" --overwrite
 			# Ensure required files are present in the packaged app
 			   cp package.json "$(pwd)/dist/dubswitch-darwin-arm64/"
 			   cp main.js "$(pwd)/dist/dubswitch-darwin-arm64/"
@@ -91,8 +91,8 @@ for platform in "${selected_platforms[@]}"; do
 			   rm -rf "$(pwd)/dist/dubswitch-mac-arm64-tmp"
 			;;
 			win-x64)
-				npx electron-packager . x32-router --platform=win32 --arch=x64 --out="$(pwd)/dist/" \
-				--ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
+				npx electron-packager . dubswitch --platform=win32 --arch=x64 --out="$(pwd)/dist/" \
+				--ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|dubswitch-.*" --overwrite
 				# Find the actual packaged directory under dist (electron-packager may name it differently)
 				OUTDIR="$(pwd)/dist"
 				PACK_DIR=""
@@ -138,8 +138,8 @@ for platform in "${selected_platforms[@]}"; do
 					# electron-builder expects a config, so create a minimal one on the fly
 					cat > win-builder.json <<EOF
 {
-  "appId": "de.dubmajor.x32router",
-  "productName": "x32-router",
+  "appId": "de.dubmajor.dubswitch",
+  "productName": "dubswitch",
 	"icon": "resources/dubswitch.ico",
 	"directories": {
 		"app": "$PACK_DIR",
@@ -221,8 +221,8 @@ EOF
 				fi
 				;;
 		linux-arm64)
-			npx electron-packager . x32-router --platform=linux --arch=arm64 --out="$(pwd)/dist/" \
-			--ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
+			npx electron-packager . dubswitch --platform=linux --arch=arm64 --out="$(pwd)/dist/" \
+			--ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|dubswitch-.*" --overwrite
 			# Detect actual packaged output directory under dist (electron-packager may name it differently)
 			OUTDIR="$(pwd)/dist"
 			PACK_DIR=""
@@ -254,8 +254,8 @@ EOF
 			rm -rf "$(pwd)/dist/dubswitch-linux-arm64-tmp"
 			;;
 		linux-x64)
-					 npx electron-packager . x32-router --platform=linux --arch=x64 --out="$(pwd)/dist/" \
-					 --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
+					 npx electron-packager . dubswitch --platform=linux --arch=x64 --out="$(pwd)/dist/" \
+					 --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|dubswitch-.*" --overwrite
 					# Detect actual packaged output directory under dist (electron-packager may name it differently)
 					OUTDIR="$(pwd)/dist"
 					PACK_DIR=""
@@ -314,5 +314,5 @@ echo "Release packaging complete. Files in $dist_dir/"
 # IMPORTANT: keep the dist-release-* artifacts (final release bundles) intact.
 echo "Cleaning up intermediate build artefacts from project folder..."
 # remove the intermediate 'dist' folder and common packager temp outputs, but DO NOT remove dist-release-*
-rm -rf dist x32-router-darwin-* x32-router-win32-* x32-router-linux-* deb-tmp
+rm -rf dist dubswitch-darwin-* dubswitch-win32-* dubswitch-linux-* deb-tmp
 echo "Intermediate build artefacts removed. Final release bundles are in $dist_dir/"

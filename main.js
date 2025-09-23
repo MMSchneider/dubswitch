@@ -104,7 +104,7 @@ function createWindow() {
     webPreferences: { nodeIntegration: false },
     autoHideMenuBar: true,
     // Set a meaningful title including the app version
-    title: `x32-router v${pkg.version}`
+  title: `dubswitch v${pkg.version}`
   };
   if (fs.existsSync(possibleIcon)) winOpts.icon = possibleIcon;
   // Add a preload script so the renderer can request main-process actions
@@ -236,7 +236,7 @@ app.whenReady().then(async () => {
     if (!ok) console.warn('Timed out waiting for local server to start; creating window anyway.');
     const win = createWindow();
     // Ensure title is preserved after renderer loads
-    try { win.setTitle(`x32-router v${pkg.version}`); } catch (e) {}
+  try { win.setTitle(`dubswitch v${pkg.version}`); } catch (e) {}
   }
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
