@@ -476,17 +476,9 @@
           s.defer = true;
           document.head.appendChild(s);
         }
-        // Small debug banner with origin + WS URL
+        // Small debug banner removed per request (was showing Origin | WS)
         try {
-          const debugOn = (window.__DUBSWITCH_DEBUG__ === true) || (location.protocol === 'file:') || host === 'localhost' || host === '127.0.0.1' || /[?&]debug=1\b/.test(location.search||'');
-          if (debugOn) {
-            const el = document.createElement('div');
-            el.style.cssText = 'position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,0.65);color:#cfeee8;padding:6px 10px;border-radius:6px;z-index:20000;font:12px/1.2 monospace';
-            var originTxt = (typeof getApiOrigin === 'function') ? (getApiOrigin() || '(relative)') : 'unknown';
-            var wsTxt = (function(){ try { var o = (typeof getApiOrigin === 'function') ? (getApiOrigin() || '') : ''; if (o) return o.replace(/^http:/,'ws:').replace(/^https:/,'wss:').replace(/\/$/,''); var p = (location.protocol==='https:'?'wss:':'ws:'); return p + '//' + location.host; } catch(e){ return 'n/a'; } })();
-            el.textContent = 'Origin: ' + originTxt + ' | WS: ' + wsTxt;
-            document.body.appendChild(el);
-          }
+          // intentionally no-op: banner disabled
         } catch (e) {}
       } catch (e) {}
     })();
