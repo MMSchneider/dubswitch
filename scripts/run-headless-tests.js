@@ -18,6 +18,7 @@ server.on('spawn', async ()=>{
     'headless-rename-test.js',
     'headless-clp-send-test.js',
     'headless-settings-test.js',
+    'headless-ip-tab-test.js',
     'headless-colors-picker-test.js',
     'headless-colors-update-test.js'
   ];

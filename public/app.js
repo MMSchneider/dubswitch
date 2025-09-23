@@ -2472,6 +2472,104 @@ window.addEventListener('DOMContentLoaded', ()=>{
     } catch (e) {}
   }
   function wireAll(){ wireSettingsBtn(); wireDiagnosticsGroup(); wireServerPortButtons(); wireColorsTab(); }
+  // Ensure the Settings → IP tab controls are wired even if app.js loads late
+  function wireIpTab(){
+    try {
+      // Autodiscover button
+      const autodBtn = document.getElementById('autodiscoverBtn');
+      if (autodBtn && !autodBtn.dataset.wired) {
+        autodBtn.dataset.wired = '1';
+        autodBtn.addEventListener('click', async ()=>{
+          try {
+            autodBtn.disabled = true;
+            const res = await fetch(apiUrl('/autodiscover-x32'));
+            const json = await res.json().catch(()=>null);
+            if (json && json.ip) {
+              const ipEl = document.getElementById('x32IpInput'); if (ipEl) ipEl.value = json.ip;
+              safeSendWs(JSON.stringify({ type: 'set_x32_ip', ip: json.ip }));
+              showToast('X32 discovered: ' + json.ip);
+            } else {
+              showToast('No X32 discovered');
+            }
+          } catch (e) { console.error('autodiscover failed', e); showToast('Autodiscover failed'); }
+          finally { try { autodBtn.disabled = false; } catch (e){} }
+        });
+      }
+      // Save IP button
+      const saveBtn = document.getElementById('saveIpBtn');
+      if (saveBtn && !saveBtn.dataset.wired) {
+        saveBtn.dataset.wired = '1';
+        saveBtn.addEventListener('click', ()=>{
+          try {
+            const ipEl = document.getElementById('x32IpInput');
+            const ip = ipEl ? String(ipEl.value||'').trim() : '';
+            if (!ip) { showToast('Enter an IP first'); return; }
+            safeSendWs(JSON.stringify({ type: 'set_x32_ip', ip }));
+            showToast('X32 IP saved');
+            // Optional: also persist local API port (if present)
+            try {
+              const portEl = document.getElementById('localPortInput');
+              if (portEl && portEl.value) {
+                const portVal = String(portEl.value).trim();
+                if (/^\d{2,5}$/.test(portVal)) {
+                  const origin = 'http://localhost:' + portVal;
+                  try { localStorage.setItem('dubswitch_api_origin', origin); } catch (_) {}
+                  window.__DUBSWITCH_API_ORIGIN__ = origin;
+                  showToast('Local API origin set to ' + origin);
+                  try { pollStatusForHeader(); } catch (_) {}
+                } else {
+                  showToast('Invalid port — not saved');
+                }
+              }
+            } catch (_) {}
+          } catch (e) { console.error('saveIp failed', e); }
+        });
+      }
+      // Enumerate Sources
+      const enumBtn = document.getElementById('enumerateBtn');
+      const enumContainer = document.getElementById('enumerate-results-container');
+      const enumPre = document.getElementById('enumerate-results');
+      const enumDownload = document.getElementById('enumerate-download-csv');
+      const enumClear = document.getElementById('enumerate-clear');
+      if (enumBtn && !enumBtn.dataset.wired) {
+        enumBtn.dataset.wired = '1';
+        enumBtn.addEventListener('click', async ()=>{
+          try {
+            enumBtn.disabled = true; enumBtn.textContent = 'Enumerating…';
+            const resp = await fetch(apiUrl('/enumerate-sources'));
+            const json = await resp.json().catch(()=>null);
+            window.enumerateResults = json || {};
+            if (enumContainer) enumContainer.style.display = 'block';
+            if (enumPre) enumPre.textContent = JSON.stringify(window.enumerateResults, null, 2);
+            try { renderStaticMatrixTable(); } catch (_) {}
+            if (enumDownload && !enumDownload.dataset.wired) {
+              enumDownload.dataset.wired = '1';
+              enumDownload.addEventListener('click', ()=>{
+                const rows = ['ch,value,label'];
+                const up = window.enumerateResults && window.enumerateResults.userPatches;
+                if (up) {
+                  for (const ch of Object.keys(up)) {
+                    const v = up[ch] && up[ch].value != null ? up[ch].value : '';
+                    const lbl = up[ch] && up[ch].label ? up[ch].label : '';
+                    rows.push(`${ch},${v},${lbl}`);
+                  }
+                }
+                const csv = rows.join('\n');
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a'); a.href = url; a.download = 'enumerate-sources.csv'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+              });
+            }
+            if (enumClear && !enumClear.dataset.wired) {
+              enumClear.dataset.wired = '1';
+              enumClear.addEventListener('click', ()=>{ if (enumContainer) enumContainer.style.display = 'none'; if (enumPre) enumPre.textContent = ''; window.enumerateResults = null; try { renderStaticMatrixTable(); } catch (_) {} });
+            }
+          } catch (e) { console.error('enumerate failed', e); showToast('Enumerate failed'); }
+          finally { try { enumBtn.disabled = false; enumBtn.textContent = 'Enumerate Sources'; } catch(_){} }
+        });
+      }
+    } catch (e) { /* ignore */ }
+  }
   // Also wire Matrix tab activation to re-render its content
   try {
     const tabLink = document.getElementById('tab-matrix-link');
@@ -2497,7 +2595,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
     document.addEventListener('DOMContentLoaded', wireAll, { once: true });
   } else {
     // DOM already parsed, wire now
-    wireAll();
+    wireAll(); wireIpTab();
   }
   // Also wire when the Server tab is activated (Bootstrap or plain click)
   try {
@@ -2507,6 +2605,16 @@ window.addEventListener('DOMContentLoaded', ()=>{
       const activate = () => { try { wireServerPortButtons(); } catch (e) {} };
       serverTab.addEventListener('click', activate, { passive: true });
       if (window.jQuery && window.jQuery(serverTab).on) { try { window.jQuery(serverTab).on('shown.bs.tab', activate); } catch (e) {} }
+    }
+  } catch (e) {}
+  // Wire IP tab activation to attach handlers if not already wired
+  try {
+    const ipTab = document.getElementById('tab-ip-link');
+    if (ipTab && !ipTab.dataset.wireIpTab) {
+      ipTab.dataset.wireIpTab = '1';
+      const activate = () => { try { wireIpTab(); } catch (e) {} };
+      ipTab.addEventListener('click', activate, { passive: true });
+      if (window.jQuery && window.jQuery(ipTab).on) { try { window.jQuery(ipTab).on('shown.bs.tab', activate); } catch (e) {} }
     }
   } catch (e) {}
   // Wire Colors tab activation to ensure inputs are initialized and listeners attached
