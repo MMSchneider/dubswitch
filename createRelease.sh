@@ -45,6 +45,66 @@ if [[ ${#selected_platforms[@]} -eq 0 ]]; then
 	exit 1
 fi
 
+# Helpers for Docker management on macOS
+is_docker_running() {
+	docker info >/dev/null 2>&1
+}
+
+start_docker_desktop_macos() {
+	echo "Trying to start Docker Desktop..."
+	# Launch the app; -g prevents bringing it to foreground
+	open -ga Docker || open -a Docker || true
+	# Wait up to 180s for docker daemon
+	local tries=0
+	local max=180
+	while ! is_docker_running; do
+		tries=$((tries+1))
+		if [ $tries -ge $max ]; then
+			echo "Timed out waiting for Docker Desktop to start."
+			return 1
+		fi
+		sleep 1
+		if [ $((tries % 10)) -eq 0 ]; then
+			echo "Waiting for Docker... ($tries s)"
+		fi
+	done
+	echo "Docker is running."
+	return 0
+}
+
+stop_docker_desktop_macos() {
+	echo "Stopping Docker Desktop (was started by this script)..."
+	# Politely ask the app to quit
+	osascript -e 'quit app "Docker"' >/dev/null 2>&1 || true
+}
+
+# Preflight: if Linux targets selected, on macOS ensure Docker is available for .deb builds
+NEEDS_LINUX=false
+for p in "${selected_platforms[@]}"; do
+	case "$p" in
+		linux-*) NEEDS_LINUX=true ;;
+	esac
+done
+if [ "$NEEDS_LINUX" = true ]; then
+	if [ "$(uname -s)" = "Darwin" ]; then
+		DOCKER_STARTED_BY_SCRIPT=false
+		if ! command -v docker >/dev/null 2>&1; then
+			echo "NOTE: Docker CLI not found. Linux .deb packages will be skipped on macOS."
+			echo "Install Docker Desktop to enable cross-building (https://www.docker.com/)."
+		else
+			if is_docker_running; then
+				echo "Docker is already running on macOS."
+			else
+				if start_docker_desktop_macos; then
+					DOCKER_STARTED_BY_SCRIPT=true
+				else
+					echo "Docker could not be started. Linux .deb packages will be skipped."
+				fi
+			fi
+		fi
+	fi
+fi
+
 for platform in "${selected_platforms[@]}"; do
 		echo "Cleaning $(pwd)/dist before packaging for $platform..."
 		rm -rf "$(pwd)/dist"/*
@@ -52,7 +112,7 @@ for platform in "${selected_platforms[@]}"; do
 		mac-x64)
 			   npx electron-packager . dubswitch --platform=darwin --arch=x64 --out="$(pwd)/dist/" \
 			   --icon=resources/dubswitch.icns \
-			   --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
+		   --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|dubswitch-.*" --overwrite
 			# Ensure required files are present in the packaged app
 			   cp package.json "$(pwd)/dist/dubswitch-darwin-x64/"
 			   cp main.js "$(pwd)/dist/dubswitch-darwin-x64/"
@@ -73,7 +133,7 @@ for platform in "${selected_platforms[@]}"; do
 		mac-arm64)
 			   npx electron-packager . dubswitch --platform=darwin --arch=arm64 --out="$(pwd)/dist/" \
 			   --icon=resources/dubswitch.icns \
-			   --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
+		   --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|dubswitch-.*" --overwrite
 			# Ensure required files are present in the packaged app
 			   cp package.json "$(pwd)/dist/dubswitch-darwin-arm64/"
 			   cp main.js "$(pwd)/dist/dubswitch-darwin-arm64/"
@@ -91,8 +151,8 @@ for platform in "${selected_platforms[@]}"; do
 			   rm -rf "$(pwd)/dist/dubswitch-mac-arm64-tmp"
 			;;
 			win-x64)
-				npx electron-packager . x32-router --platform=win32 --arch=x64 --out="$(pwd)/dist/" \
-				--ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
+				npx electron-packager . dubswitch --platform=win32 --arch=x64 --out="$(pwd)/dist/" \
+				--ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|dubswitch-.*" --overwrite
 				# Find the actual packaged directory under dist (electron-packager may name it differently)
 				OUTDIR="$(pwd)/dist"
 				PACK_DIR=""
@@ -130,16 +190,12 @@ for platform in "${selected_platforms[@]}"; do
 				# included. We'll create the ZIP after electron-builder completes.
 				# Keep the temp tree for now; we'll reuse/create it after builder runs.
                 
-				# Create Windows installer using electron-builder
-				if ! command -v electron-builder >/dev/null 2>&1; then
-					echo "electron-builder not found, installing..."
-					npm install -g electron-builder
-				fi
+				# Create Windows installer using electron-builder (via npx)
 					# electron-builder expects a config, so create a minimal one on the fly
 					cat > win-builder.json <<EOF
 {
-  "appId": "de.dubmajor.x32router",
-  "productName": "x32-router",
+  "appId": "de.dubmajor.dubswitch",
+  "productName": "dubswitch",
 	"icon": "resources/dubswitch.ico",
 	"directories": {
 		"app": "$PACK_DIR",
@@ -162,7 +218,7 @@ for platform in "${selected_platforms[@]}"; do
   }
 }
 EOF
-				electron-builder --config win-builder.json --win --x64
+				npx electron-builder --config win-builder.json --win --x64
 				rm -f win-builder.json
 
 				# After electron-builder runs it typically produces a 'win-unpacked'
@@ -221,8 +277,8 @@ EOF
 				fi
 				;;
 		linux-arm64)
-			npx electron-packager . x32-router --platform=linux --arch=arm64 --out="$(pwd)/dist/" \
-			--ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
+			npx electron-packager . dubswitch --platform=linux --arch=arm64 --out="$(pwd)/dist/" \
+			--ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|dubswitch-.*" --overwrite
 			# Detect actual packaged output directory under dist (electron-packager may name it differently)
 			OUTDIR="$(pwd)/dist"
 			PACK_DIR=""
@@ -252,10 +308,38 @@ EOF
 			[ -f README.md ] && cp README.md "$(pwd)/dist/dubswitch-linux-arm64-tmp/Dubswitch/"
 			(cd "$(pwd)/dist/dubswitch-linux-arm64-tmp" && zip -r "$dist_dir/dubswitch-linux-arm64-$tag.zip" Dubswitch)
 			rm -rf "$(pwd)/dist/dubswitch-linux-arm64-tmp"
+			# Optionally build a .deb package using electron-builder (requires Linux host or Docker)
+			BUILD_CAN_USE_DOCKER=false
+			if command -v docker >/dev/null 2>&1; then BUILD_CAN_USE_DOCKER=true; fi
+			if [ "$(uname -s)" = "Linux" ] || [ "$BUILD_CAN_USE_DOCKER" = true ]; then
+				cat > linux-builder.json <<EOF
+{
+  "appId": "de.dubmajor.dubswitch",
+  "productName": "dubswitch",
+	"directories": { "app": ".", "output": "$dist_dir" },
+  "linux": {
+    "target": ["deb"],
+    "category": "AudioVideo",
+    "maintainer": "Mike Schneider <info@dubmajor.de>",
+    "icon": "resources/dubswitch_1024.png",
+    "artifactName": "dubswitch-${arch}-${version}.${ext}"
+  },
+  "extraMetadata": {
+    "version": "$tag",
+    "description": "X32/M32 Input & User-Patch Router with OSC and Web UI. Control and route X32/M32 mixer channels from your desktop.",
+    "author": "Mike Schneider <info@dubmajor.de>"
+  }
+}
+EOF
+				npx electron-builder --config linux-builder.json --linux deb --arm64 || echo "electron-builder failed to create .deb (ensure Docker on macOS or run on Linux)."
+				rm -f linux-builder.json
+			else
+				echo "Skipping .deb build for linux-arm64: requires Linux or Docker (not found)."
+			fi
 			;;
 		linux-x64)
-					 npx electron-packager . x32-router --platform=linux --arch=x64 --out="$(pwd)/dist/" \
-					 --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|x32-router-.*" --overwrite
+					 npx electron-packager . dubswitch --platform=linux --arch=x64 --out="$(pwd)/dist/" \
+					 --ignore="dist|dist-release-|.git|.DS_Store|.*\\.zip|.*\\.log|createRelease.*|dubswitch-.*" --overwrite
 					# Detect actual packaged output directory under dist (electron-packager may name it differently)
 					OUTDIR="$(pwd)/dist"
 					PACK_DIR=""
@@ -285,9 +369,34 @@ EOF
 					[ -f README.md ] && cp README.md "$(pwd)/dist/dubswitch-linux-x64-tmp/Dubswitch/"
 					(cd "$(pwd)/dist/dubswitch-linux-x64-tmp" && zip -r "$dist_dir/dubswitch-linux-x64-$tag.zip" Dubswitch)
 					rm -rf "$(pwd)/dist/dubswitch-linux-x64-tmp"
-			 # (linux-x64) NOTE: create only the ZIP (mirror linux-arm64 behaviour)
-			 # The .deb creation step requires fakeroot/dpkg and is platform
-			 # specific; to keep parity with linux-arm64 we skip .deb here.
+			 # Optionally build a .deb package using electron-builder (requires Linux host or Docker)
+			BUILD_CAN_USE_DOCKER=false
+			if command -v docker >/dev/null 2>&1; then BUILD_CAN_USE_DOCKER=true; fi
+			if [ "$(uname -s)" = "Linux" ] || [ "$BUILD_CAN_USE_DOCKER" = true ]; then
+				cat > linux-builder.json <<EOF
+{
+  "appId": "de.dubmajor.dubswitch",
+  "productName": "dubswitch",
+	"directories": { "app": ".", "output": "$dist_dir" },
+  "linux": {
+    "target": ["deb"],
+    "category": "AudioVideo",
+    "maintainer": "Mike Schneider <info@dubmajor.de>",
+    "icon": "resources/dubswitch_1024.png",
+    "artifactName": "dubswitch-${arch}-${version}.${ext}"
+  },
+  "extraMetadata": {
+    "version": "$tag",
+    "description": "X32/M32 Input & User-Patch Router with OSC and Web UI. Control and route X32/M32 mixer channels from your desktop.",
+    "author": "Mike Schneider <info@dubmajor.de>"
+  }
+}
+EOF
+				npx electron-builder --config linux-builder.json --linux deb --x64 || echo "electron-builder failed to create .deb (ensure Docker on macOS or run on Linux)."
+				rm -f linux-builder.json
+			else
+				echo "Skipping .deb build for linux-x64: requires Linux or Docker (not found)."
+			fi
 
 			;;
 	esac
@@ -314,5 +423,26 @@ echo "Release packaging complete. Files in $dist_dir/"
 # IMPORTANT: keep the dist-release-* artifacts (final release bundles) intact.
 echo "Cleaning up intermediate build artefacts from project folder..."
 # remove the intermediate 'dist' folder and common packager temp outputs, but DO NOT remove dist-release-*
-rm -rf dist x32-router-darwin-* x32-router-win32-* x32-router-linux-* deb-tmp
+rm -rf dist dubswitch-darwin-* dubswitch-win32-* dubswitch-linux-* deb-tmp
 echo "Intermediate build artefacts removed. Final release bundles are in $dist_dir/"
+
+# Summary: check for .deb artifacts and hint if missing
+if ls "$dist_dir"/*.deb >/dev/null 2>&1; then
+	echo "Debian packages created:"
+	ls -1 "$dist_dir"/*.deb || true
+	# If we started Docker Desktop earlier, stop it now
+	if [ "$(uname -s)" = "Darwin" ] && [ "${DOCKER_STARTED_BY_SCRIPT:-false}" = true ]; then
+		stop_docker_desktop_macos
+	fi
+else
+	echo "No .deb packages were created."
+	if [ "$(uname -s)" = "Darwin" ]; then
+		if ! command -v docker >/dev/null 2>&1; then
+			echo "Hint: Install and run Docker Desktop to build Linux .deb packages on macOS."
+		else
+			echo "Hint: Ensure Docker Desktop is running and try again (electron-builder uses Docker for Linux targets on macOS)."
+		fi
+	else
+		echo "Hint (Linux): install dpkg-dev and fakeroot if electron-builder complains about missing tools."
+	fi
+fi

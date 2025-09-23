@@ -2,14 +2,14 @@
   "files.exclude": {
     "node_modules": true,
     "dist": true,
-    "x32-router-darwin-x64": true,
+    "dubswitch-darwin-x64": true,
     ".DS_Store": true,
     "*.log": true
   },
   "search.exclude": {
     "node_modules": true,
     "dist": true,
-    "x32-router-darwin-x64": true
+    "dubswitch-darwin-x64": true
   },
   "git.enableSmartCommit": true,
   "git.confirmSync": false

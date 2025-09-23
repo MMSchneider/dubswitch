@@ -63,7 +63,7 @@ ls -la dist-release-0.0.1
 3. Verify Windows ZIP contains runtime files:
 
 ```bash
-unzip -l dist-release-0.0.1/dubswitch-win-x64-0.0.1.zip | grep -E 'x32-router|\.dll|locales|resources|app.asar.unpacked'
+unzip -l dist-release-0.0.1/dubswitch-win-x64-0.0.1.zip | grep -E 'dubswitch|\.dll|locales|resources|app.asar.unpacked'
 ```
 
 4. On mac: expand the mac zip and verify `.app/Contents/Resources/app` contains `resources/` and `public/vendor`.
@@ -189,3 +189,41 @@ Release date: 2025-09-23
 ## Suggested commit message
 
 "chore(release): v0.1.2 — All A/B bulk apply with Undo, footer version\n\n- rename bulk buttons and wire to matrix A/B mapping (persisted or computed)\n- add undo snapshot for both bulk actions; resend CLP to restore\n- display app version in header and inline in footer"
+
+<!-- appended v0.1.3 release notes -->
+
+# Release v0.1.3 — OSC log visibility, rename robustness, and Server tab simplification
+
+Release date: 2025-09-23
+
+## Highlights
+
+- OSC tab now shows both outgoing commands and incoming replies; server forwards generic OSC messages so replies are visible without custom handlers.
+- Channel rename flow hardened: client truncates long names, marks pending state, and clears on reply; server allows broadcast CLP before discovery so writes/readbacks work sooner.
+- Server port change UX simplified: only “Apply & Exit.” Port persists to userData/server.port and is honored on relaunch; origin probing includes 3001.
+- Settings → Routing: removed the “Set all to UserIns” button; kept “Switch all Inputs” and per-block quick actions.
+
+## Changes
+
+- public/app.js
+  - Added appendClpLog and wired IN/OUT entries to the OSC tab log; capped list size and auto-scroll.
+  - Improved rename: truncate to 12 chars, mark pending, clear on name replies; update UI accordingly.
+  - Simplified Server tab: removed Apply-only path and status previews; only “Apply & Exit” remains.
+  - Removed wiring for the removed “Set all to UserIns” button; kept toggle inputs and per-block actions.
+- server.js
+  - Forwards all incoming OSC messages to clients as generic `clp` frames, in addition to specific handlers.
+  - Allows CLP sending and ping via broadcast when X32_IP is unknown (no early drop).
+  - Status endpoint includes `ifaces` and `port` used by header.
+- public/index.html
+  - Removed the “Set all to UserIns” button from Routing; ensured “Switch all Inputs” is present.
+
+## Verify
+
+1. Open the OSC tab and send a command like `/xinfo`; observe `[OUT]` and `[IN]` log lines.
+2. Rename a channel to a long string; UI truncates to 12 chars and clears pending once a reply arrives.
+3. Change server port in Settings → Server → Apply & Exit; relaunch and confirm the new port is used.
+4. Settings → Routing shows only “Switch all Inputs” plus per-block quick actions.
+
+## Suggested commit message
+
+"chore(release): v0.1.3 — OSC log visibility, rename robustness, and Server tab simplification\n\n- log OSC OUT/IN in UI; server forwards generic OSC replies\n- harden rename flow (truncate/pending/clear); allow broadcast CLP pre-discovery\n- simplify port-change to Apply & Exit with persistence and origin probe\n- remove 'Set all to UserIns' from Routing"

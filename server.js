@@ -107,7 +107,10 @@ try {
 } catch (e) { console.warn('Failed to read existing matrix.json:', e && e.message); persistedMatrix = {}; }
 
 // Persisted HTTP port file (simple text file containing port number)
-const PORT_PERSIST_PATH = path.join(__dirname, 'server.port');
+// In packaged app, Electron main passes DUBSWITCH_PORT_FILE pointing
+// to app.getPath('userData')/server.port so we can write to a writable
+// location. In dev, fall back to the repo directory.
+const PORT_PERSIST_PATH = process.env.DUBSWITCH_PORT_FILE || path.join(__dirname, 'server.port');
 let persistedPort = null;
 try {
   if (fs.existsSync(PORT_PERSIST_PATH)) {
@@ -175,6 +178,15 @@ oscPort.on('message', (msg, timeTag, info) => {
       wss.clients.forEach(ws => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload)); });
     }
   }
+  // Generic forwarder: send any OSC message as a 'clp' frame for the OSC console
+  // This ensures the OSC tab sees replies to custom commands like /xinfo or others
+  // even when they are not part of the specialized handlers above.
+  try {
+    if (msg && msg.address) {
+      const payload = { type: 'clp', address: msg.address, args: msg.args || [] };
+      if (wss && wss.clients) wss.clients.forEach(ws => { if (ws.readyState === WebSocket.OPEN) { try { ws.send(JSON.stringify(payload)); } catch (e) {} } });
+    }
+  } catch (e) { /* swallow */ }
 });
 
 // Enumerate possible source codes by probing a conservative set of likely values
@@ -379,7 +391,13 @@ function setupWebsocketHandlers(currentWss) {
         setTimeout(() => readAllRouting(ws), 300);
         return;
       }
-      if (!X32_IP) return console.warn('X32 not connected yet.');
+
+      // Note: Even if X32_IP is not yet known, we allow certain operations
+      // to proceed. sendOsc() falls back to BROADCAST_ADDR when X32_IP is null,
+      // which lets devices that listen to broadcast handle writes/reads.
+      // We keep more complex flows (like full routing refresh) robust by
+      // scheduling them as usual; their replies will be processed once the
+      // device responds.
 
       switch (data.type) {
         case 'load_routing':
@@ -409,7 +427,7 @@ function setupWebsocketHandlers(currentWss) {
           break;
 
         case 'ping':
-          try { oscPort.send({ address: '/xinfo', args: [] }, X32_IP, X32_OSC_PORT); } catch (e) {}
+          try { oscPort.send({ address: '/xinfo', args: [] }, X32_IP || BROADCAST_ADDR, X32_OSC_PORT); } catch (e) {}
           break;
 
         case 'clp':

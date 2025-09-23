@@ -20,6 +20,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     } catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
   }
  ,
+  // Quit the application (no relaunch). Used after saving a new port.
+  quitApp: async () => {
+    try {
+      if (!ipcRenderer || !ipcRenderer.invoke) return { ok: false, error: 'ipc-unavailable' };
+      const res = await ipcRenderer.invoke('quit-app');
+      return res || { ok: false, error: 'no-response' };
+    } catch (e) { return { ok: false, error: (e && e.message) || String(e) }; }
+  }
+ ,
   getServerLog: async () => {
     try {
       if (!ipcRenderer || !ipcRenderer.invoke) return { ok: false, error: 'ipc-unavailable' };

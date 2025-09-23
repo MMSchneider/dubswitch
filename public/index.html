@@ -184,9 +184,7 @@
                       <h5 style="margin:0">Input Routing</h5>
                     </div>
                     <div style="display:flex;gap:8px;align-items:center">
-                      <!-- Quick helper to set all blocks to UserIns -->
-                      <button id="switch-to-userins" class="btn btn-sm btn-primary" title="Set all blocks to UserIns">Set all to UserIns</button>
-                      <button id="toggle-inputs" class="btn btn-sm btn-outline-secondary" onclick="toggleAllInputs()" disabled>Switch all Inputs</button>
+                      <button id="toggle-inputs" class="btn btn-sm btn-outline-secondary" onclick="toggleAllInputs()">Switch all Inputs</button>
                       <!-- Per-block quick UserIns buttons (1-8, 9-16, 17-24, 25-32) -->
                       <div class="block-quick-buttons">
                         <button id="userins-block-0" class="btn btn-sm btn-outline-light block-quick-btn" title="Block 1-8 — click to toggle" onclick="setBlockToUserIns(0)"><span class="btn-label">1–8</span><span class="btn-badge"></span></button>
@@ -230,16 +228,11 @@
                 <div class="form-group">
                   <label for="localPortInput">Local server port</label>
                   <input type="text" class="form-control" id="localPortInput" placeholder="e.g. 3000">
-                  <small class="form-text text-muted">This sets the local HTTP server port for the app (default: 3000). Clicking Save will ask the running server to rebind to this port (POST /set-port). If the server cannot bind (port in use or permission denied) the request will fail — you can alternatively restart the server with <code>PORT=&lt;port&gt;</code> when launching.</small>
+                  <small class="form-text text-muted">Set the local HTTP server port (default: 3000), then click <strong>Apply &amp; Exit</strong>. Relaunch the app to use the new port. If the port is already in use or cannot be bound, the change will fail. You can also start with <code>PORT=&lt;port&gt;</code>.</small>
                 </div>
-                <div style="display:flex;gap:8px;align-items:center;margin-top:8px">
-                  <div style="flex:1"></div>
-                  <button type="button" class="btn btn-secondary" id="viewServerLogBtn">View server log</button>
-                  <button type="button" class="btn btn-primary" id="savePortBtn">Save Port</button>
-                  <button type="button" class="btn btn-sm btn-outline-light" id="restartNowBtn" style="margin-left:8px">Restart now</button>
+                <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:8px">
+                  <button type="button" class="btn btn-danger" id="applyAndExitBtn">Apply &amp; Exit</button>
                 </div>
-                <div id="serverStatusPreview" class="small-muted" style="margin-top:8px;font-family:monospace">Origin: — | status: —</div>
-                <div id="serverLastStatus" class="small-muted" style="margin-top:6px;font-family:monospace">Last start: —</div>
               </div>
             </div>
             <!-- Hidden placeholders for legacy IDs expected by app.js/check scripts -->

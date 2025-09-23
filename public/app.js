@@ -128,10 +128,9 @@ function apiUrl(path) {
   return path;
 }
 
-// NOTE: Origin probing and automatic fallback logic removed. The app will
-// use the configured API origin (localStorage / runtime override) or the
-// current location. When the user changes the port the server persists the
-// choice and exits so the application can be restarted on the new port.
+// NOTE: When the user changes the port, the server persists the choice and
+// exits. The UI now shows a blocking dialog and quits the app; the user must
+// relaunch to apply the new port. No automatic restart is attempted.
 
 // Minimal DOM element fallbacks used by various functions below. If the
 // real element exists, these will be replaced by actual nodes during
@@ -179,6 +178,71 @@ function hideConnectDialog() {
     const el = document.getElementById('connect-overlay'); if (el) el.remove();
     if (connectDialogTimeout) { try { clearTimeout(connectDialogTimeout); connectDialogTimeout = null; } catch(e){} }
   } catch (e) { console.warn('hideConnectDialog failed', e); }
+}
+
+// Lightweight blocking info modal used to announce quitting/restart.
+function showBlockingInfoModal(message, onConfirm) {
+  try {
+    let modal = document.getElementById('blocking-info-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'blocking-info-modal';
+      modal.style.position = 'fixed';
+      modal.style.left = 0; modal.style.top = 0; modal.style.right = 0; modal.style.bottom = 0;
+      modal.style.background = 'rgba(0,0,0,0.6)';
+      modal.style.zIndex = 30000;
+      modal.innerHTML = '<div style="position:absolute;left:50%;top:35%;transform:translate(-50%,-35%);background:#222;color:#fff;padding:18px 22px;border-radius:8px;min-width:320px;max-width:600px;text-align:center;">'
+        + '<div id="blocking-info-text" style="margin-bottom:14px;">Info</div>'
+        + '<div><button id="blocking-info-ok" class="btn btn-primary">OK</button></div>'
+        + '</div>';
+      document.body.appendChild(modal);
+    }
+    const txt = modal.querySelector('#blocking-info-text'); if (txt) txt.textContent = message || 'Info';
+    const ok = modal.querySelector('#blocking-info-ok');
+    if (ok) {
+      ok.onclick = async () => {
+        try { if (onConfirm) await onConfirm(); } finally {
+          try { modal.remove(); } catch (e) {}
+        }
+      };
+    }
+  } catch (e) {
+    // As a fallback, alert and then call onConfirm
+    try { alert(message || 'Info'); } catch (_e) {}
+    if (onConfirm) { try { onConfirm(); } catch (_e) {} }
+  }
+}
+
+// Confirm modal offering Exit (confirm) and Cancel actions.
+function showConfirmExitModal(message, onExit) {
+  try {
+    let modal = document.getElementById('confirm-exit-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'confirm-exit-modal';
+      modal.style.position = 'fixed';
+      modal.style.left = 0; modal.style.top = 0; modal.style.right = 0; modal.style.bottom = 0;
+      modal.style.background = 'rgba(0,0,0,0.6)';
+      modal.style.zIndex = 30000;
+      modal.innerHTML = '<div style="position:absolute;left:50%;top:35%;transform:translate(-50%,-35%);background:#222;color:#fff;padding:18px 22px;border-radius:8px;min-width:320px;max-width:640px;text-align:center;">'
+        + '<div id="confirm-exit-text" style="margin-bottom:14px;">Confirm</div>'
+        + '<div style="display:flex;gap:10px;justify-content:center">'
+        + '  <button id="confirm-exit-ok" class="btn btn-danger">Exit App</button>'
+        + '  <button id="confirm-exit-cancel" class="btn btn-secondary">Cancel</button>'
+        + '</div>'
+        + '</div>';
+      document.body.appendChild(modal);
+    }
+    const txt = modal.querySelector('#confirm-exit-text'); if (txt) txt.textContent = message || 'Confirm';
+    const ok = modal.querySelector('#confirm-exit-ok');
+    const cancel = modal.querySelector('#confirm-exit-cancel');
+    if (ok) ok.onclick = async () => { try { if (onExit) await onExit(); } finally { try { modal.remove(); } catch (e) {} } };
+    if (cancel) cancel.onclick = () => { try { modal.remove(); } catch (e) {} };
+  } catch (e) {
+    if (confirm(message || 'Exit now?')) {
+      if (onExit) { try { onExit(); } catch (_e) {} }
+    }
+  }
 }
 
 // Friendly one-line status used in multiple places. Keeps header consistent
@@ -310,36 +374,8 @@ var colorMap = window.colorMap || { null: 'transparent' };
                 return status;
               }
 
-              async function updateServerStatusUI() {
-                const s = await fetchServerStatus();
-                const runningLabel = s.running ? 'running' : 'stopped';
-                const origin = (typeof localStorage !== 'undefined' && localStorage.getItem('dubswitch_api_origin')) ? localStorage.getItem('dubswitch_api_origin') : '—';
-                const statusEl = document.getElementById('serverStatusPreview');
-                if (statusEl) statusEl.textContent = `Origin: ${origin} | status: ${runningLabel}`;
-                const lastEl = document.getElementById('serverLastStatus');
-                // If running in dev mode, attempt to fetch richer supervisor status
-                if (IS_DEV) {
-                  try {
-                    const r = await fetch(apiUrl('/supervisor-status'));
-                    if (r.ok) {
-                      const info = await r.json().catch(()=>null);
-                      if (info && lastEl) {
-                        const t = info.pidMtime ? new Date(info.pidMtime).toLocaleString() : '—';
-                        lastEl.textContent = `Supervisor PID: ${info.pid || '—'} running=${info.pidRunning ? 'yes' : 'no'} (pid mtime: ${t})`;
-                        return;
-                      }
-                    }
-                  } catch (e) { /* ignore and fall back to generic display */ }
-                }
-                if (s.lastExit && lastEl) {
-                  const t = s.lastExit.time ? new Date(s.lastExit.time).toLocaleString() : '—';
-                  const code = s.lastExit.code != null ? s.lastExit.code : '—';
-                  const signal = s.lastExit.signal || '—';
-                  lastEl.textContent = `Last exit: code=${code} signal=${signal} at ${t}`;
-                } else if (lastEl) {
-                  lastEl.textContent = 'Last start: —';
-                }
-              }
+              // server status preview removed per UX simplification
+              async function updateServerStatusUI() { return; }
 
               async function fetchServerLogPage(offset, length) {
                 if (window.electronAPI && window.electronAPI.getServerLog) {
@@ -1149,11 +1185,13 @@ async function pollStatusForHeader() {
       try {
         const cfg = getApiOrigin(); if (cfg) candidates.push(cfg);
       } catch (e) {}
-      // Common local ports to try
-      candidates.push('http://localhost:3000');
-      candidates.push('http://localhost:4000');
-      candidates.push('http://127.0.0.1:3000');
-      candidates.push('http://127.0.0.1:4000');
+  // Common local ports to try (include 3001 to recover after Apply & Exit)
+  candidates.push('http://localhost:3000');
+  candidates.push('http://localhost:3001');
+  candidates.push('http://localhost:4000');
+  candidates.push('http://127.0.0.1:3000');
+  candidates.push('http://127.0.0.1:3001');
+  candidates.push('http://127.0.0.1:4000');
 
       let found = null;
       for (const c of candidates) {
@@ -1180,10 +1218,7 @@ async function pollStatusForHeader() {
       } else {
         dbg('All fallback origins failed.');
         // No candidate worked — surface a clear preview and stop here
-        try {
-          const preview = document.getElementById('serverStatusPreview');
-          if (preview) preview.textContent = 'Origin: ' + (getApiOrigin() || 'http://localhost:3000') + ' | status: unreachable';
-        } catch (e) {}
+        // Server status preview removed
         try { showToast('Local server unreachable at configured origin', 3000); } catch (e) {}
         return;
       }
@@ -1250,19 +1285,7 @@ async function pollStatusForHeader() {
     // Update one-line Server status preview (if present)
     try {
       try {
-        const preview = document.getElementById('serverStatusPreview');
-        if (preview) {
-          const origin = getApiOrigin() || 'http://localhost:3000';
-          const pieces = ['Origin: ' + origin.replace(/^https?:\/\//, '').replace(/\/$/, '')];
-          if (j) {
-            const extras = [];
-            if (typeof j.wsClients !== 'undefined') extras.push('ws=' + j.wsClients);
-            if (typeof j.pingCount !== 'undefined') extras.push('pings=' + j.pingCount);
-            if (j.x32Ip) extras.push('x32=' + j.x32Ip);
-            if (extras.length) pieces.push('status: ' + extras.join(', '));
-          }
-          preview.textContent = pieces.join(' | ');
-        }
+        // Server status preview removed
       } catch (e) {}
     } catch (e) {}
   } catch (e) {}
@@ -1349,8 +1372,8 @@ window.addEventListener('DOMContentLoaded', ()=>{
     window.userPatchesPending = true;
 
     // Wire autodiscover and save IP buttons in Settings
-    try {
-      const autodBtn = document.getElementById('autodiscoverBtn');
+            try {
+              const autodBtn = document.getElementById('autodiscoverBtn');
       if (autodBtn) {
         autodBtn.onclick = async () => {
           try {
@@ -1394,60 +1417,38 @@ window.addEventListener('DOMContentLoaded', ()=>{
                 }
               }
             } catch (e) {}
-            // Separate Save Port button (placed in its own Server tab)
-            try {
-              const savePortBtn = document.getElementById('savePortBtn');
-              if (savePortBtn) {
-                savePortBtn.onclick = async () => {
-                  try {
-                    const portEl = document.getElementById('localPortInput');
-                    if (!portEl || !portEl.value) { showToast('Enter a port first'); return; }
-                    const portVal = String(portEl.value).trim();
-                    if (!/^\d{2,5}$/.test(portVal)) { showToast('Invalid port'); return; }
-                    savePortBtn.disabled = true;
-                    savePortBtn.textContent = 'Saving…';
-                    // Ask currently-running server to rebind
-                    try {
-                      const resp = await fetch(apiUrl('/set-port'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ port: Number(portVal) }) });
-                      const json = await resp.json().catch(()=>null);
-                      if (resp.ok && json && json.ok) {
-                        const origin = 'http://localhost:' + portVal;
-                        try { localStorage.setItem('dubswitch_api_origin', origin); } catch (e) {}
-                        window.__DUBSWITCH_API_ORIGIN__ = origin;
-                              // Longer success toast with an action to reconnect WS immediately
-                              // The action will reconnect the WebSocket and, if the page
-                              // was originally served from a different host:port, will
-                              // navigate the browser to the new origin so the UI is
-                              // loaded from the newly-bound server.
-                              showToast('Port saved. Please restart the application to apply the new port.', 8000);
-                        try { pollStatusForHeader(); } catch (e) {}
-                        // Also auto-reconnect shortly after successful rebind so user sees the change
-                        // No automatic reconnect
-                        // If this page was loaded over http(s) and the host:port differs
-                        // from the newly-bound server, automatically navigate there so
-                        // the UI (assets and location-based logic) are served from
-                        // the new origin. Delay slightly to give the server time to bind.
-                        try {
-                          const currentHost = (location && location.host) ? location.host : '';
-                          const newHost = origin.replace(/^https?:\/\//, '').replace(/\/$/, '');
-                          if (location && location.protocol && location.protocol.indexOf('http') === 0 && currentHost && currentHost !== newHost) {
-                            setTimeout(()=>{
-                              try { window.location.replace(origin + (location.pathname || '/')); } catch(e){}
-                            }, 900);
-                          }
-                        } catch (e) {}
-                      } else {
-                        const msg = (json && json.error) ? json.error : ('HTTP ' + resp.status);
-                        showToast('Failed to change port: ' + msg);
-                      }
-                    } catch (e) { console.error('set-port request failed', e); showToast('Failed to contact server'); }
-                  } finally { try { savePortBtn.disabled = false; savePortBtn.textContent = 'Save Port'; } catch (e){} }
-                };
-              }
-            } catch (e) {}
           } catch (e) { console.error('saveIp failed', e); }
         };
       }
+      // Wire Server tab Apply & Exit button (bind on DOMContentLoaded)
+      try {
+        const applyAndExitBtn = document.getElementById('applyAndExitBtn');
+        if (applyAndExitBtn) {
+          dbg('Bind: applyAndExitBtn found');
+          applyAndExitBtn.onclick = async () => {
+            try {
+              const portEl = document.getElementById('localPortInput');
+              if (!portEl || !portEl.value) { showToast('Enter a port first'); return; }
+              const portVal = String(portEl.value).trim();
+              if (!/^\d{2,5}$/.test(portVal)) { showToast('Invalid port'); return; }
+              try { showToast('Saving port and exiting…'); } catch (e) {}
+              applyAndExitBtn.disabled = true; applyAndExitBtn.textContent = 'Saving…';
+              const newOrigin = 'http://localhost:' + portVal;
+              const currentOrigin = getApiOrigin() || (location && location.origin) || '';
+              const setPortUrl = (currentOrigin ? currentOrigin.replace(/\/$/, '') : '') + '/set-port';
+              dbg('ApplyAndExit: currentOrigin=', currentOrigin, 'newOrigin=', newOrigin, 'setPortUrl=', setPortUrl);
+              try {
+                const resp = await fetch(setPortUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ port: Number(portVal) }) });
+                dbg('ApplyAndExit: response ok=', resp.ok, 'status=', resp.status);
+              } catch (e) { console.warn('ApplyAndExit: set-port request failed', e); }
+              try { localStorage.setItem('dubswitch_api_origin', newOrigin); } catch (e) { dbg('ApplyAndExit: failed to persist origin:', e && e.message); }
+              window.__DUBSWITCH_API_ORIGIN__ = newOrigin;
+              if (window.electronAPI && typeof window.electronAPI.quitApp === 'function') { await window.electronAPI.quitApp(); }
+              else { try { location.reload(); } catch (e) {} }
+            } finally { try { applyAndExitBtn.disabled = false; applyAndExitBtn.textContent = 'Apply & Exit'; } catch (e){} }
+          };
+        } else { dbg('Bind: applyAndExitBtn not found'); }
+      } catch (e) { console.error('Bind Server tab apply buttons failed', e); }
       // Prefill local port input if stored
       try {
         const storedOrigin = (typeof localStorage !== 'undefined') ? localStorage.getItem('dubswitch_api_origin') : null;
@@ -1588,13 +1589,19 @@ function handleWsMessage(ev) {
         break;
       case 'channel_names':
         if (data.names) {
+          // Merge new names and clear pending flags for any channels included
           window.channelNames = Object.assign({}, window.channelNames || {}, data.names);
+          try {
+            window.channelNamePending = window.channelNamePending || {};
+            Object.keys(data.names).forEach(k => { window.channelNamePending[k] = false; });
+          } catch (e) {}
           try { renderUserPatches(); } catch (e) {}
         }
         break;
       case 'clp':
         // Example CLP forwarding: update userPatches or channelNames when replies arrive
         if (data.address && typeof data.address === 'string') {
+          try { appendClpLog('IN', data.address, data.args || []); } catch (e) {}
           if (/^\/config\/userrout\/in\//.test(data.address)) {
             const m = data.address.match(/in\/(\d{2})$/);
             if (m && data.args && data.args.length) {
@@ -1610,6 +1617,7 @@ function handleWsMessage(ev) {
             if (mm && data.args && data.args.length) {
               const chnum = mm[1]; const name = (data.args[0] && data.args[0].value) ? data.args[0].value : data.args[0];
               window.channelNames = window.channelNames || {}; window.channelNames[chnum] = name;
+              try { window.channelNamePending = window.channelNamePending || {}; window.channelNamePending[chnum] = false; } catch (e) {}
               try { renderUserPatches(); } catch (e) {}
             }
           }
@@ -1709,8 +1717,6 @@ function checkUserIns() {
 
 // Attach dialog button handlers
 window.addEventListener('DOMContentLoaded',()=>{
-  const sw = document.getElementById('switch-to-userins');
-  if (sw) sw.onclick = ()=>{ safeSendWs(JSON.stringify({type:'toggle_inputs',targets:blocks.map(b=>b.userin)})); setTimeout(()=>safeSendWs(JSON.stringify({type:'load_routing'})),500); };
   // 'matrix-allow-local-toggle' checkbox removed from UI; no initialization required
 });
 
@@ -2005,12 +2011,19 @@ function renderUserPatches(){
       const currentName = channelNames[chKey] || "";
       const newName = prompt(`Rename channel ${nn}:`, currentName);
       if(newName && newName.trim() && newName !== currentName){
+        let safeName = newName.trim();
+        // X32 channel names are typically limited (~12 chars). Truncate to be safe.
+        if (safeName.length > 12) {
+          const was = safeName;
+          safeName = safeName.slice(0, 12);
+          try { showToast(`Name too long; truncated to "${safeName}"`, 2200); } catch (e) {}
+        }
         channelNamePending[chKey] = true;
         renderUserPatches();
         safeSendWs(JSON.stringify({
           type: "clp",
           address: `/ch/${nn}/config/name`,
-          args: [newName.trim()]
+          args: [safeName]
         }));
         setTimeout(() => {
           safeSendWs(JSON.stringify({
@@ -2096,10 +2109,38 @@ function sendCustomOSC() {
     }
   if (!address || address[0] !== '/') { showToast('Invalid OSC address (must start with /)'); return; }
   console.log('CLP sending from UI:', address, args);
+  try { appendClpLog('OUT', address, args); } catch (e) {}
   safeSendWs(JSON.stringify({ type: 'clp', address, args }));
     // small UX feedback
     showToast('OSC sent');
   } catch (e) { console.error('sendCustomOSC failed', e); }
+}
+
+// Append an entry to the OSC log panel in Settings → OSC
+function appendClpLog(direction, address, args) {
+  try {
+    const logEl = document.getElementById('clp-log');
+    if (!logEl) return;
+    // Normalize args to primitive values for readability
+    const normArgs = (args || []).map(a => {
+      if (a && typeof a === 'object') {
+        if ('value' in a) return a.value;
+        if ('type' in a && 'value' in a) return a.value;
+      }
+      return a;
+    });
+    const row = document.createElement('div');
+    row.style.fontFamily = 'monospace';
+    row.style.fontSize = '12px';
+    row.style.padding = '2px 0';
+    const tag = direction === 'OUT' ? '[OUT]' : '[IN ]';
+    row.textContent = `${tag} ${address} ${JSON.stringify(normArgs)}`;
+    logEl.appendChild(row);
+    // Keep the log reasonably short (last ~200 entries)
+    const max = 200; while (logEl.children.length > max) { try { logEl.removeChild(logEl.firstChild); } catch (e) { break; } }
+    // Auto-scroll to bottom
+    try { logEl.scrollTop = logEl.scrollHeight; } catch (e) {}
+  } catch (e) { /* ignore */ }
 }
 
 // Focus trap for settings modal
@@ -2255,7 +2296,38 @@ window.addEventListener('DOMContentLoaded', ()=>{
       }
     } catch (e) {}
   }
-  function wireAll(){ wireSettingsBtn(); wireDiagnosticsGroup(); }
+  // Fallback wiring for Server tab Apply buttons
+  function wireServerPortButtons(){
+    try {
+      const applyAndExitBtn = document.getElementById('applyAndExitBtn');
+      if (applyAndExitBtn && !applyAndExitBtn.dataset.wired) {
+        applyAndExitBtn.dataset.wired = '1';
+        applyAndExitBtn.addEventListener('click', async () => {
+          try {
+            const portEl = document.getElementById('localPortInput');
+            if (!portEl || !portEl.value) { showToast('Enter a port first'); return; }
+            const portVal = String(portEl.value).trim();
+            if (!/^\d{2,5}$/.test(portVal)) { showToast('Invalid port'); return; }
+            try { showToast('Saving port and exiting…'); } catch (e) {}
+            applyAndExitBtn.disabled = true; applyAndExitBtn.textContent = 'Saving…';
+            const newOrigin = 'http://localhost:' + portVal;
+            const currentOrigin = getApiOrigin() || (location && location.origin) || '';
+            const setPortUrl = (currentOrigin ? currentOrigin.replace(/\/$/, '') : '') + '/set-port';
+            dbg && dbg('ApplyAndExit(fallback): currentOrigin=', currentOrigin, 'newOrigin=', newOrigin, 'setPortUrl=', setPortUrl);
+            try {
+              const resp = await fetch(setPortUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ port: Number(portVal) }) });
+              dbg && dbg('ApplyAndExit(fallback): response ok=', resp.ok, 'status=', resp.status);
+            } catch (e) { console.warn('ApplyAndExit(fallback): set-port request failed', e); }
+            try { localStorage.setItem('dubswitch_api_origin', newOrigin); } catch (e) { dbg && dbg('ApplyAndExit(fallback): persist origin failed:', e && e.message); }
+            window.__DUBSWITCH_API_ORIGIN__ = newOrigin;
+            if (window.electronAPI && typeof window.electronAPI.quitApp === 'function') { await window.electronAPI.quitApp(); }
+            else { try { location.reload(); } catch (e) {} }
+          } finally { try { applyAndExitBtn.disabled = false; applyAndExitBtn.textContent = 'Apply & Exit'; } catch (e){} }
+        }, { passive: true });
+      }
+    } catch (e) {}
+  }
+  function wireAll(){ wireSettingsBtn(); wireDiagnosticsGroup(); wireServerPortButtons(); }
   // Also wire Matrix tab activation to re-render its content
   try {
     const tabLink = document.getElementById('tab-matrix-link');
@@ -2283,6 +2355,16 @@ window.addEventListener('DOMContentLoaded', ()=>{
     // DOM already parsed, wire now
     wireAll();
   }
+  // Also wire when the Server tab is activated (Bootstrap or plain click)
+  try {
+    const serverTab = document.getElementById('tab-server-link');
+    if (serverTab && !serverTab.dataset.wireServerPortButtons) {
+      serverTab.dataset.wireServerPortButtons = '1';
+      const activate = () => { try { wireServerPortButtons(); } catch (e) {} };
+      serverTab.addEventListener('click', activate, { passive: true });
+      if (window.jQuery && window.jQuery(serverTab).on) { try { window.jQuery(serverTab).on('shown.bs.tab', activate); } catch (e) {} }
+    }
+  } catch (e) {}
 })();
 
 // Fallback: support [data-dismiss="modal"] close buttons without Bootstrap JS
