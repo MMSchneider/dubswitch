@@ -178,6 +178,15 @@ oscPort.on('message', (msg, timeTag, info) => {
       wss.clients.forEach(ws => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload)); });
     }
   }
+  // Generic forwarder: send any OSC message as a 'clp' frame for the OSC console
+  // This ensures the OSC tab sees replies to custom commands like /xinfo or others
+  // even when they are not part of the specialized handlers above.
+  try {
+    if (msg && msg.address) {
+      const payload = { type: 'clp', address: msg.address, args: msg.args || [] };
+      if (wss && wss.clients) wss.clients.forEach(ws => { if (ws.readyState === WebSocket.OPEN) { try { ws.send(JSON.stringify(payload)); } catch (e) {} } });
+    }
+  } catch (e) { /* swallow */ }
 });
 
 // Enumerate possible source codes by probing a conservative set of likely values

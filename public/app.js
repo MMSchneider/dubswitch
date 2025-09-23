@@ -1601,6 +1601,7 @@ function handleWsMessage(ev) {
       case 'clp':
         // Example CLP forwarding: update userPatches or channelNames when replies arrive
         if (data.address && typeof data.address === 'string') {
+          try { appendClpLog('IN', data.address, data.args || []); } catch (e) {}
           if (/^\/config\/userrout\/in\//.test(data.address)) {
             const m = data.address.match(/in\/(\d{2})$/);
             if (m && data.args && data.args.length) {
@@ -1716,8 +1717,6 @@ function checkUserIns() {
 
 // Attach dialog button handlers
 window.addEventListener('DOMContentLoaded',()=>{
-  const sw = document.getElementById('switch-to-userins');
-  if (sw) sw.onclick = ()=>{ safeSendWs(JSON.stringify({type:'toggle_inputs',targets:blocks.map(b=>b.userin)})); setTimeout(()=>safeSendWs(JSON.stringify({type:'load_routing'})),500); };
   // 'matrix-allow-local-toggle' checkbox removed from UI; no initialization required
 });
 
@@ -2110,10 +2109,38 @@ function sendCustomOSC() {
     }
   if (!address || address[0] !== '/') { showToast('Invalid OSC address (must start with /)'); return; }
   console.log('CLP sending from UI:', address, args);
+  try { appendClpLog('OUT', address, args); } catch (e) {}
   safeSendWs(JSON.stringify({ type: 'clp', address, args }));
     // small UX feedback
     showToast('OSC sent');
   } catch (e) { console.error('sendCustomOSC failed', e); }
+}
+
+// Append an entry to the OSC log panel in Settings → OSC
+function appendClpLog(direction, address, args) {
+  try {
+    const logEl = document.getElementById('clp-log');
+    if (!logEl) return;
+    // Normalize args to primitive values for readability
+    const normArgs = (args || []).map(a => {
+      if (a && typeof a === 'object') {
+        if ('value' in a) return a.value;
+        if ('type' in a && 'value' in a) return a.value;
+      }
+      return a;
+    });
+    const row = document.createElement('div');
+    row.style.fontFamily = 'monospace';
+    row.style.fontSize = '12px';
+    row.style.padding = '2px 0';
+    const tag = direction === 'OUT' ? '[OUT]' : '[IN ]';
+    row.textContent = `${tag} ${address} ${JSON.stringify(normArgs)}`;
+    logEl.appendChild(row);
+    // Keep the log reasonably short (last ~200 entries)
+    const max = 200; while (logEl.children.length > max) { try { logEl.removeChild(logEl.firstChild); } catch (e) { break; } }
+    // Auto-scroll to bottom
+    try { logEl.scrollTop = logEl.scrollHeight; } catch (e) {}
+  } catch (e) { /* ignore */ }
 }
 
 // Focus trap for settings modal
