@@ -106,6 +106,18 @@ try {
   }
 } catch (e) { console.warn('Failed to read existing matrix.json:', e && e.message); persistedMatrix = {}; }
 
+// Persisted UI color preferences for shared stations
+const DEFAULT_COLORS = { local: '#222222', daw: '#0074D9', aes50a: '#f59e0b', aes50b: '#8b5cf6' };
+const COLORS_PATH = path.join(__dirname, 'colors.json');
+let persistedColors = { ...DEFAULT_COLORS };
+try {
+  if (fs.existsSync(COLORS_PATH)) {
+    const raw = fs.readFileSync(COLORS_PATH, 'utf8') || '{}';
+    const json = JSON.parse(raw);
+    persistedColors = { ...DEFAULT_COLORS, ...(json || {}) };
+  }
+} catch (e) { console.warn('Failed to read existing colors.json:', e && e.message); persistedColors = { ...DEFAULT_COLORS }; }
+
 // Persisted HTTP port file (simple text file containing port number)
 // In packaged app, Electron main passes DUBSWITCH_PORT_FILE pointing
 // to app.getPath('userData')/server.port so we can write to a writable
@@ -294,6 +306,43 @@ app.post('/set-channel-matrix', (req, res) => {
     // Always return the canonical persisted matrix so clients re-render server truth
     return res.json({ ok: true, matrix: persistedMatrix });
   } catch (e) { return res.status(500).json({ error: String(e && e.message) }); }
+});
+
+// Expose and persist shared color preferences across clients
+app.get('/get-colors', (req, res) => {
+  try { return res.json({ colors: persistedColors || DEFAULT_COLORS }); }
+  catch (e) { return res.status(500).json({ error: String(e && e.message) }); }
+});
+
+app.post('/set-colors', (req, res) => {
+  try {
+    const body = req.body || {};
+    const incoming = body.colors || body;
+    if (!incoming || typeof incoming !== 'object') return res.status(400).json({ ok: false, error: 'invalid payload' });
+    // Validate and merge with defaults (only allow the four known keys)
+    const next = { ...DEFAULT_COLORS };
+    const keys = ['local', 'daw', 'aes50a', 'aes50b'];
+    const hex = /^#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/;
+    for (const k of keys) {
+      const v = incoming[k];
+      if (typeof v === 'string' && hex.test(v)) next[k] = v;
+      else if (v != null) return res.status(400).json({ ok: false, error: `invalid color for ${k}` });
+    }
+    // Persist atomically
+    try {
+      const tmp = COLORS_PATH + '.tmp';
+      fs.writeFileSync(tmp, JSON.stringify(next, null, 2), 'utf8');
+      fs.renameSync(tmp, COLORS_PATH);
+      // Reload canonical
+      try { const raw = fs.readFileSync(COLORS_PATH, 'utf8') || '{}'; persistedColors = { ...DEFAULT_COLORS, ...(JSON.parse(raw) || {}) }; } catch (e) { persistedColors = next; }
+    } catch (e) {
+      console.error('Failed to persist colors.json:', e && e.message);
+      return res.status(500).json({ ok: false, error: 'persist_failed' });
+    }
+    // Broadcast update so all connected UIs refresh
+    try { if (wss && wss.clients) wss.clients.forEach(ws => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'colors_update', colors: persistedColors })); }); } catch (e) {}
+    return res.json({ ok: true, colors: persistedColors });
+  } catch (e) { return res.status(500).json({ ok: false, error: String(e && e.message) }); }
 });
 
 // Troubleshooting helper: report matrix.json file status, ownership and a small sample

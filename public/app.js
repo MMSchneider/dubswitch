@@ -67,6 +67,18 @@ try {
   window.addEventListener('unhandledrejection', function(ev){ try { dbg('unhandledrejection:', ev && (ev.reason && ev.reason.message ? ev.reason.message : ev.reason)); } catch (e) {} });
 } catch (e) {}
 
+// Simple HTML escaper for attribute-safe strings
+function escapeHtml(str){
+  try {
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  } catch (_) { return String(str); }
+}
+
 // Helper to send via WebSocket only when open
 // Send data over the global WebSocket if it's open. If the socket is not
 // yet open, attach a one-time 'open' listener to send once the connection
@@ -306,6 +318,25 @@ var channelNames = window.channelNames || {};
 var channelNamePending = window.channelNamePending || {};
 var channelColors = window.channelColors || {};
 var colorMap = window.colorMap || { null: 'transparent' };
+// Default UI colors for source types; persisted in localStorage under 'dubswitch_colors'
+const DEFAULT_COLORS = {
+  local: '#222222',   // LocalIns background
+  daw: '#0074D9',     // DAW/Card background
+  aes50a: '#f59e0b',  // AES50A (amber)
+  aes50b: '#8b5cf6'   // AES50B (purple)
+};
+function loadColorPrefs(){
+  try {
+    const raw = localStorage.getItem('dubswitch_colors');
+    if (!raw) return { ...DEFAULT_COLORS };
+    const obj = JSON.parse(raw);
+    return { ...DEFAULT_COLORS, ...obj };
+  } catch (_) { return { ...DEFAULT_COLORS }; }
+}
+function saveColorPrefs(prefs){
+  try { localStorage.setItem('dubswitch_colors', JSON.stringify(prefs || {})); } catch (_) {}
+}
+window.__colorPrefs = loadColorPrefs();
 
 // Lightweight periodic sync to keep the legacy identifiers pointing at the
 // latest values if the server updates `window.*` directly.
@@ -642,6 +673,84 @@ function refreshUserPatches() {
   }
 }
 
+// In-place recolor helper to avoid full grid re-render flicker.
+// Applies background colors to existing channel buttons and LEDs
+// based on current window.__colorPrefs and window.userPatches.
+function updateButtonColorsFromPrefs() {
+  try {
+    const colors = (window.__colorPrefs || DEFAULT_COLORS);
+    let any = false;
+    for (let ch = 1; ch <= 32; ch++) {
+      const nn = String(ch).padStart(2, '0');
+      const btn = document.getElementById(`btn-${nn}`);
+      const topLed = document.getElementById(`led-${nn}`);
+      const innerLed = document.getElementById(`inner-led-${nn}`);
+      if (!btn || !topLed || !innerLed) continue;
+      const cVal = (window.channelColors && window.channelColors[ch]);
+      const uVal = (window.userPatches && window.userPatches[ch] != null) ? Number(window.userPatches[ch]) : ch;
+      if (uVal>=1 && uVal<=32) {
+        btn.style.backgroundColor = colors.local;
+        topLed.style.background = colors.local;
+        innerLed.style.background = 'red';
+      } else if (uVal>=33 && uVal<=80) { // AES50A
+        btn.style.backgroundColor = colors.aes50a;
+        topLed.style.background = colors.aes50a;
+        innerLed.style.background = colors.aes50a;
+      } else if (uVal>=81 && uVal<=128) { // AES50B
+        btn.style.backgroundColor = colors.aes50b;
+        topLed.style.background = colors.aes50b;
+        innerLed.style.background = colors.aes50b;
+      } else if (uVal>=129 && uVal<=160) { // DAW
+        btn.style.backgroundColor = colors.daw;
+        topLed.style.background = '#39e639'; // keep green accent LED for DAW top
+        innerLed.style.background = 'green';
+      } else {
+        btn.style.backgroundColor = cVal != null ? (window.colorMap ? window.colorMap[cVal] : 'transparent') : 'transparent';
+        topLed.style.background = '#333';
+        innerLed.style.background = '#333';
+      }
+      any = true;
+    }
+    return any;
+  } catch (e) {
+    console.warn('updateButtonColorsFromPrefs failed', e);
+    return false;
+  }
+}
+
+// Wire the Colors tab inputs to update prefs and recolor in-place.
+function wireColorsTab(){
+  try {
+    const ids = ['color-local','color-daw','color-aes50a','color-aes50b'];
+    const map = { 'color-local':'local', 'color-daw':'daw', 'color-aes50a':'aes50a', 'color-aes50b':'aes50b' };
+    const prefs = window.__colorPrefs || loadColorPrefs();
+    ids.forEach(id => { const el = document.getElementById(id); if (el) { el.value = prefs[map[id]] || DEFAULT_COLORS[map[id]]; } });
+    async function apply(){
+      const p = { ...prefs };
+      ids.forEach(id => { const el = document.getElementById(id); if (el && el.value) { p[map[id]] = el.value; } });
+      try { console.log('[Colors] apply()', JSON.stringify(p)); } catch(_){}
+      window.__colorPrefs = p; saveColorPrefs(p);
+      try {
+        const updated = updateButtonColorsFromPrefs();
+        try { console.log('[Colors] updateButtonColorsFromPrefs ->', updated); } catch(_){}
+        if (!updated) renderUserPatches();
+      } catch (_) { try { renderUserPatches(); } catch(e){} }
+      try { await fetch(apiUrl('/set-colors'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ colors: p }) }); } catch (_) {}
+    }
+    ids.forEach(id => { const el = document.getElementById(id); if (el && !el.dataset.wired) { el.dataset.wired='1'; el.addEventListener('input', apply); el.addEventListener('change', apply); } });
+    const resetBtn = document.getElementById('colors-reset');
+    if (resetBtn && !resetBtn.dataset.wired) {
+      resetBtn.dataset.wired='1';
+      resetBtn.addEventListener('click', async ()=>{
+        window.__colorPrefs = { ...DEFAULT_COLORS }; saveColorPrefs(window.__colorPrefs);
+        ids.forEach(id => { const el = document.getElementById(id); if (el) el.value = window.__colorPrefs[map[id]]; });
+        try { if (!updateButtonColorsFromPrefs()) renderUserPatches(); } catch (_) { try { renderUserPatches(); } catch(e){} }
+        try { await fetch(apiUrl('/set-colors'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ colors: window.__colorPrefs }) }); } catch (_) {}
+      });
+    }
+  } catch (_) {}
+}
+
 // Single WebSocket manager
 window.ws = window.ws || null;
 function createWs(url) {
@@ -676,6 +785,17 @@ function createWs(url) {
         const nn = String(ch).padStart(2, '0');
         safeSendWs(JSON.stringify({ type: 'clp', address: `/ch/${nn}/config/name`, args: [] }));
       }
+      // Fetch shared colors from server and merge with local prefs
+      try {
+        fetch(apiUrl('/get-colors')).then(r=>r.ok?r.json():null).then(js=>{
+          if (js && js.colors) {
+            // Merge server with local, favor server values
+            const merged = { ...DEFAULT_COLORS, ...(window.__colorPrefs||{}), ...(js.colors||{}) };
+            window.__colorPrefs = merged; saveColorPrefs(merged);
+            try { renderUserPatches(); } catch (_) {}
+          }
+        }).catch(()=>{});
+      } catch (_) {}
     } catch (e) { console.warn('initial WS queries failed', e); }
   };
   window.ws.onclose = () => {
@@ -1553,6 +1673,16 @@ function handleWsMessage(ev) {
         hideConnectDialog();
         setConnectedStatus(window.lastX32Ip);
         break;
+      case 'colors_update':
+        try {
+          if (data.colors) {
+            const merged = { ...DEFAULT_COLORS, ...(window.__colorPrefs||{}), ...(data.colors||{}) };
+            window.__colorPrefs = merged; saveColorPrefs(merged);
+            // Prefer in-place recolor to avoid flicker; fall back to full render if grid not present
+            try { if (!updateButtonColorsFromPrefs()) renderUserPatches(); } catch (_) { try { renderUserPatches(); } catch(e){} }
+          }
+        } catch (_) {}
+        break;
       case 'routing':
         if (Array.isArray(data.values)) {
           dbg('[WS] routing values:', data.values);
@@ -1932,6 +2062,7 @@ function renderUserPatches(){
   syncGlobals();
   // Ensure channelMatrix initialized from current toggleMatrix so runtime buttons follow settings
   initChannelMatrixFromBlocks();
+  const colors = window.__colorPrefs || DEFAULT_COLORS;
   let html="";
   // If we're still waiting for per-channel reads to arrive, render placeholders
   const pending = !!window.userPatchesPending;
@@ -1971,7 +2102,7 @@ function renderUserPatches(){
           </button>
         </div>
         <div id="btn-${nn}" class="channel-btn card-body">
-          <div class="channel-title" id="chname-${nn}">${name}</div>
+          <div class="channel-title" id="chname-${nn}" title="${escapeHtml(name)}">${name}</div>
           <div class="up-type" style="font-size:0.8em;color:#adff2f;margin-top:6px">${patchTypeText}</div>
           <span class="led" id="inner-led-${nn}"></span>
         </div>
@@ -1985,23 +2116,33 @@ function renderUserPatches(){
     const card= document.getElementById(`card-${nn}`);
   const cVal=(window.channelColors&&window.channelColors[ch]);
     const uVal=userPatches[ch]||ch;
-    if(uVal>=1&&uVal<=32){
-      btn.style.backgroundColor = "#222"; // dark grey for Local
-    } else if(uVal>=129&&uVal<=160){
-      btn.style.backgroundColor = "#0074D9"; // blue for Card
+    if (uVal>=1 && uVal<=32) {
+      btn.style.backgroundColor = colors.local;
+    } else if (uVal>=33 && uVal<=80) { // AES50A 1..48
+      btn.style.backgroundColor = colors.aes50a;
+    } else if (uVal>=81 && uVal<=128) { // AES50B 1..48
+      btn.style.backgroundColor = colors.aes50b;
+    } else if (uVal>=129 && uVal<=160) { // DAW 1..32
+      btn.style.backgroundColor = colors.daw;
     } else {
       btn.style.backgroundColor = cVal!=null? colorMap[cVal] : "transparent";
     }
     const topLed = document.getElementById(`led-${nn}`);
     const innerLed = document.getElementById(`inner-led-${nn}`);
-    if(uVal>=1&&uVal<=32){
-      topLed.style.background="#222"; // dark grey for Local
-      innerLed.style.background="red";
-    } else if(uVal>=129&&uVal<=160){
-      topLed.style.background="#39e639"; // green for Card
-      innerLed.style.background="green";
+    if (uVal>=1 && uVal<=32) {
+      topLed.style.background = colors.local;
+      innerLed.style.background = 'red';
+    } else if (uVal>=33 && uVal<=80) { // AES50A
+      topLed.style.background = colors.aes50a;
+      innerLed.style.background = colors.aes50a;
+    } else if (uVal>=81 && uVal<=128) { // AES50B
+      topLed.style.background = colors.aes50b;
+      innerLed.style.background = colors.aes50b;
+    } else if (uVal>=129 && uVal<=160) { // DAW
+      topLed.style.background = '#39e639'; // keep green accent LED for DAW
+      innerLed.style.background = 'green';
     } else {
-      topLed.style.background="#333"; innerLed.style.background="#333";
+      topLed.style.background = "#333"; innerLed.style.background = "#333";
     }
     const nameEl = document.getElementById(`chname-${nn}`);
     const iconEl = document.getElementById(`rename-icon-${nn}`);
@@ -2078,6 +2219,7 @@ function renderUserPatches(){
       renderUserPatches();
     };
   }
+  try { fitUpTypeLabels(); fitChannelTitles(); } catch (e) {}
 }
 
 function togglePanel(panel) {
@@ -2177,6 +2319,8 @@ function appendClpLog(direction, address, args) {
 // Wire the Settings button to open the Settings modal (explicit handler)
 window.addEventListener('DOMContentLoaded', ()=>{
   try {
+    // Colors tab wiring
+    wireColorsTab();
     const settingsBtn = document.getElementById('settingsBtn');
     if (settingsBtn) {
       settingsBtn.addEventListener('click', (e) => {
@@ -2327,7 +2471,7 @@ window.addEventListener('DOMContentLoaded', ()=>{
       }
     } catch (e) {}
   }
-  function wireAll(){ wireSettingsBtn(); wireDiagnosticsGroup(); wireServerPortButtons(); }
+  function wireAll(){ wireSettingsBtn(); wireDiagnosticsGroup(); wireServerPortButtons(); wireColorsTab(); }
   // Also wire Matrix tab activation to re-render its content
   try {
     const tabLink = document.getElementById('tab-matrix-link');
@@ -2363,6 +2507,16 @@ window.addEventListener('DOMContentLoaded', ()=>{
       const activate = () => { try { wireServerPortButtons(); } catch (e) {} };
       serverTab.addEventListener('click', activate, { passive: true });
       if (window.jQuery && window.jQuery(serverTab).on) { try { window.jQuery(serverTab).on('shown.bs.tab', activate); } catch (e) {} }
+    }
+  } catch (e) {}
+  // Wire Colors tab activation to ensure inputs are initialized and listeners attached
+  try {
+    const colorsTab = document.getElementById('tab-colors-link');
+    if (colorsTab && !colorsTab.dataset.wired) {
+      colorsTab.dataset.wired = '1';
+      const activate = () => { try { wireColorsTab(); } catch (e) {} };
+      colorsTab.addEventListener('click', activate, { passive: true });
+      if (window.jQuery && window.jQuery(colorsTab).on) { try { window.jQuery(colorsTab).on('shown.bs.tab', activate); } catch (e) {} }
     }
   } catch (e) {}
 })();
@@ -2422,6 +2576,68 @@ window.onload=()=>{
   refreshUserPatches();
   safeSendWs(JSON.stringify({type:"load_routing"}));
 };
+
+// Dynamically shrink .up-type font size when the text would wrap/overflow
+function fitUpTypeLabels(){
+  try {
+    const cards = document.querySelectorAll('.channel-card .up-type');
+    cards.forEach(el => {
+      // Reset to base size before measuring
+      el.style.fontSize = '';
+      el.style.lineHeight = '1.1';
+      // Measure and shrink if needed
+      const parent = el.parentElement;
+      if (!parent) return;
+      const maxWidth = parent.clientWidth - 8; // small padding safety
+      // Early exit if it already fits without scrolling
+      if (el.scrollWidth <= maxWidth) return;
+      // Start from computed size and step down to a floor
+      const cs = window.getComputedStyle(el);
+      let size = parseFloat(cs.fontSize || '12');
+      const min = 10; // do not go below 10px for readability
+      while (size > min && el.scrollWidth > maxWidth) {
+        size -= 0.5;
+        el.style.fontSize = size + 'px';
+      }
+      // If still overflowing at min size, allow a slightly tighter letter-spacing
+      if (el.scrollWidth > maxWidth) {
+        el.style.letterSpacing = '-0.2px';
+      } else {
+        el.style.letterSpacing = '';
+      }
+    });
+  } catch (_) {}
+}
+
+// Dynamically shrink channel title font size to avoid overflow on narrow cards
+function fitChannelTitles(){
+  try {
+    const titles = document.querySelectorAll('.channel-card .channel-title');
+    titles.forEach(el => {
+      // Reset to base before measuring
+      el.style.fontSize = '';
+      const parent = el.parentElement;
+      if (!parent) return;
+      const maxWidth = parent.clientWidth - 8;
+      if (maxWidth <= 0) return;
+      if (el.scrollWidth <= maxWidth) return; // fits already
+      const cs = window.getComputedStyle(el);
+      let size = parseFloat(cs.fontSize || '15');
+      const min = 11; // keep titles reasonably readable
+      while (size > min && el.scrollWidth > maxWidth) {
+        size -= 0.5;
+        el.style.fontSize = size + 'px';
+      }
+    });
+  } catch (_) {}
+}
+
+// Re-fit on window resize (debounced)
+let __fitTimer = null;
+window.addEventListener('resize', () => {
+  try { if (__fitTimer) clearTimeout(__fitTimer); } catch (_) {}
+  __fitTimer = setTimeout(() => { try { fitUpTypeLabels(); fitChannelTitles(); } catch (_) {} }, 120);
+});
 
 // Matrix functionality has been intentionally removed server-side and client-side.
 // Provide safe defaults and no-op stubs so existing UI logic and event handlers

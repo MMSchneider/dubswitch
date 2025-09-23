@@ -89,8 +89,8 @@
   .channel-card .btn-icon-only:focus{outline:2px solid rgba(96,165,250,0.35);outline-offset:2px}
   /* Ensure inner content doesn't overflow the card when blue (DAW) color is set */
   .channel-card .channel-btn{width:100%;height:100%;box-sizing:border-box;display:flex;flex-direction:column;justify-content:flex-end;padding:12px 10px 14px}
-  .channel-card .channel-title{font-size:0.95rem;line-height:1.05}
-  .channel-card .up-type{font-size:0.78rem}
+  .channel-card .channel-title{font-size:0.95rem;line-height:1.05;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .channel-card .up-type{font-size:0.78rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
     .small-muted{color:var(--muted);font-size:0.9rem}
     #clp-log{background:rgba(0,0,0,0.15);padding:8px;border-radius:6px;color:#bfe7df;max-height:180px;overflow:auto;font-family:monospace}
     #routing-table{width:100%;border-collapse:collapse}
@@ -128,8 +128,9 @@
             </button>
           </div>
           <div class="modal-body">
-            <!-- Tabs for IP / OSC / Routing -->
+            <!-- Tabs for Colors / IP / OSC / Routing -->
             <ul class="nav nav-tabs" role="tablist">
+              <li class="nav-item"><a class="nav-link" id="tab-colors-link" data-toggle="tab" href="#tab-colors" role="tab" aria-controls="tab-colors" aria-selected="false">Colors</a></li>
               <li class="nav-item"><a class="nav-link active" id="tab-ip-link" data-toggle="tab" href="#tab-ip" role="tab" aria-controls="tab-ip" aria-selected="true">IP</a></li>
               <li class="nav-item"><a class="nav-link" id="tab-clp-link" data-toggle="tab" href="#tab-clp" role="tab" aria-controls="tab-clp" aria-selected="false">OSC</a></li>
               <li class="nav-item"><a class="nav-link" id="tab-routing-link" data-toggle="tab" href="#tab-routing" role="tab" aria-controls="tab-routing" aria-selected="false">Routing</a></li>
@@ -137,6 +138,25 @@
               <li class="nav-item"><a class="nav-link" id="tab-server-link" data-toggle="tab" href="#tab-server" role="tab" aria-controls="tab-server" aria-selected="false">Server</a></li>
             </ul>
             <div class="tab-content" style="margin-top:12px">
+              <div class="tab-pane fade" id="tab-colors" role="tabpanel" aria-labelledby="tab-colors-link">
+                <div class="small-muted" style="margin-bottom:10px">Customize button colors for each source type. Changes apply immediately and are saved locally.</div>
+                <div style="display:grid;grid-template-columns:1fr auto;gap:10px;align-items:center;max-width:520px">
+                  <label for="color-local">LocalIns</label>
+                  <input type="color" id="color-local" value="#222222" style="width:48px;height:32px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:#0b1220">
+
+                  <label for="color-daw">DAW</label>
+                  <input type="color" id="color-daw" value="#0074D9" style="width:48px;height:32px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:#0b1220">
+
+                  <label for="color-aes50a">AES50A</label>
+                  <input type="color" id="color-aes50a" value="#f59e0b" style="width:48px;height:32px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:#0b1220">
+
+                  <label for="color-aes50b">AES50B</label>
+                  <input type="color" id="color-aes50b" value="#8b5cf6" style="width:48px;height:32px;border-radius:6px;border:1px solid rgba(255,255,255,0.12);background:#0b1220">
+                </div>
+                <div style="margin-top:12px;display:flex;gap:8px">
+                  <button id="colors-reset" class="btn btn-sm btn-outline-light">Reset to defaults</button>
+                </div>
+              </div>
               <div class="tab-pane fade show active" id="tab-ip" role="tabpanel" aria-labelledby="tab-ip-link">
                 <div class="form-group">
                   <label for="x32IpInput">X32 IP Address</label>
