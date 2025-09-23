@@ -382,7 +382,13 @@ function setupWebsocketHandlers(currentWss) {
         setTimeout(() => readAllRouting(ws), 300);
         return;
       }
-      if (!X32_IP) return console.warn('X32 not connected yet.');
+
+      // Note: Even if X32_IP is not yet known, we allow certain operations
+      // to proceed. sendOsc() falls back to BROADCAST_ADDR when X32_IP is null,
+      // which lets devices that listen to broadcast handle writes/reads.
+      // We keep more complex flows (like full routing refresh) robust by
+      // scheduling them as usual; their replies will be processed once the
+      // device responds.
 
       switch (data.type) {
         case 'load_routing':
@@ -412,7 +418,7 @@ function setupWebsocketHandlers(currentWss) {
           break;
 
         case 'ping':
-          try { oscPort.send({ address: '/xinfo', args: [] }, X32_IP, X32_OSC_PORT); } catch (e) {}
+          try { oscPort.send({ address: '/xinfo', args: [] }, X32_IP || BROADCAST_ADDR, X32_OSC_PORT); } catch (e) {}
           break;
 
         case 'clp':

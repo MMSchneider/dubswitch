@@ -1589,7 +1589,12 @@ function handleWsMessage(ev) {
         break;
       case 'channel_names':
         if (data.names) {
+          // Merge new names and clear pending flags for any channels included
           window.channelNames = Object.assign({}, window.channelNames || {}, data.names);
+          try {
+            window.channelNamePending = window.channelNamePending || {};
+            Object.keys(data.names).forEach(k => { window.channelNamePending[k] = false; });
+          } catch (e) {}
           try { renderUserPatches(); } catch (e) {}
         }
         break;
@@ -1611,6 +1616,7 @@ function handleWsMessage(ev) {
             if (mm && data.args && data.args.length) {
               const chnum = mm[1]; const name = (data.args[0] && data.args[0].value) ? data.args[0].value : data.args[0];
               window.channelNames = window.channelNames || {}; window.channelNames[chnum] = name;
+              try { window.channelNamePending = window.channelNamePending || {}; window.channelNamePending[chnum] = false; } catch (e) {}
               try { renderUserPatches(); } catch (e) {}
             }
           }
@@ -2006,12 +2012,19 @@ function renderUserPatches(){
       const currentName = channelNames[chKey] || "";
       const newName = prompt(`Rename channel ${nn}:`, currentName);
       if(newName && newName.trim() && newName !== currentName){
+        let safeName = newName.trim();
+        // X32 channel names are typically limited (~12 chars). Truncate to be safe.
+        if (safeName.length > 12) {
+          const was = safeName;
+          safeName = safeName.slice(0, 12);
+          try { showToast(`Name too long; truncated to "${safeName}"`, 2200); } catch (e) {}
+        }
         channelNamePending[chKey] = true;
         renderUserPatches();
         safeSendWs(JSON.stringify({
           type: "clp",
           address: `/ch/${nn}/config/name`,
-          args: [newName.trim()]
+          args: [safeName]
         }));
         setTimeout(() => {
           safeSendWs(JSON.stringify({
