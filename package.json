@@ -1,6 +1,6 @@
 {
   "name": "dubswitch",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "X32 input router with integrated OSC command panel",
   "main": "main.js",
   "scripts": {
