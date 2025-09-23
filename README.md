@@ -12,6 +12,8 @@ It gives you **per-channel input control** and a flexible **A/B Toggle Matrix**,
 
 With DubSwitch, overdubbing becomes effortless: record on Local inputs, flip finished channels to DAW playback, and keep recording new parts — **without touching X32 scenes or user-input blocks.**
 
+No more block routing gymnastics. No more scene juggling.  
+Just fast overdubs, per-channel control, and total session clarity.
 ---
 
 ## 🚀 Key Features
