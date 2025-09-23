@@ -46,6 +46,27 @@
     inferred matrices if the user opted into autosave.
 */
 
+// --- Debug logging helpers ---------------------------------------------------
+// Enable verbose logging automatically for localhost and file://, or when
+// window.__DUBSWITCH_DEBUG__ === true, or query param ?debug=1
+const DEBUG_ON = (function(){
+  try {
+    if (typeof window !== 'undefined') {
+      if (window.__DUBSWITCH_DEBUG__ === true) return true;
+      if (/[?&]debug=1\b/.test((location && location.search) || '')) return true;
+      if (location && (location.hostname === 'localhost' || location.hostname === '127.0.0.1')) return true;
+      if (location && location.protocol === 'file:') return true;
+    }
+  } catch (e) {}
+  return false;
+})();
+function dbg(){ try { if (DEBUG_ON) { const a = Array.from(arguments); a.unshift('[DubSwitch]'); console.log.apply(console, a); } } catch (e) {} }
+// Global error surface
+try {
+  window.addEventListener('error', function(ev){ try { dbg('window error:', ev && ev.message, ev && ev.filename, ev && ev.lineno + ':' + ev.colno); } catch (e) {} });
+  window.addEventListener('unhandledrejection', function(ev){ try { dbg('unhandledrejection:', ev && (ev.reason && ev.reason.message ? ev.reason.message : ev.reason)); } catch (e) {} });
+} catch (e) {}
+
 // Helper to send via WebSocket only when open
 // Send data over the global WebSocket if it's open. If the socket is not
 // yet open, attach a one-time 'open' listener to send once the connection
@@ -53,14 +74,19 @@
 // connection may still be initializing.
 function safeSendWs(data) {
   if (window.ws && window.ws.readyState === 1) {
+    dbg('WS send (open):', (typeof data === 'string' ? data.slice(0, 160) : data));
     window.ws.send(data);
   } else {
     // Wait for connection, then send once
     if (window.ws) {
       const onceOpen = () => {
-        if (window.ws && window.ws.readyState === 1) window.ws.send(data);
+        if (window.ws && window.ws.readyState === 1) {
+          dbg('WS send (deferred until open):', (typeof data === 'string' ? data.slice(0, 160) : data));
+          window.ws.send(data);
+        }
         window.ws.removeEventListener('open', onceOpen);
       };
+      dbg('WS not open yet; deferring send until open. readyState=', window.ws && window.ws.readyState);
       window.ws.addEventListener('open', onceOpen);
     }
   }
@@ -82,8 +108,9 @@ function getApiOrigin() {
   try {
     if (window.__DUBSWITCH_API_ORIGIN__) return String(window.__DUBSWITCH_API_ORIGIN__);
     const stored = (typeof localStorage !== 'undefined') ? localStorage.getItem('dubswitch_api_origin') : null;
-    if (stored) return stored;
-    if (location && location.protocol === 'file:') return 'http://localhost:3000';
+    if (stored) { dbg('getApiOrigin: using stored origin', stored); return stored; }
+    if (location && location.protocol === 'file:') { dbg('getApiOrigin: file:// fallback -> http://localhost:3000'); return 'http://localhost:3000'; }
+    dbg('getApiOrigin: empty (use relative URLs)');
     return '';
   } catch (e) { return ''; }
 }
@@ -93,8 +120,11 @@ function apiUrl(path) {
   const API_ORIGIN = getApiOrigin();
   if (API_ORIGIN) {
     // ensure there's a single slash between origin and path
-    return API_ORIGIN.replace(/\/$/, '') + (path.startsWith('/') ? path : ('/' + path));
+    const u = API_ORIGIN.replace(/\/$/, '') + (path.startsWith('/') ? path : ('/' + path));
+    dbg('apiUrl:', path, '=>', u);
+    return u;
   }
+  dbg('apiUrl (relative):', path);
   return path;
 }
 
@@ -121,6 +151,7 @@ window.connectDialogTimeout = window.connectDialogTimeout || null;
 window.initialConnectShown = window.initialConnectShown || false;
 function showConnectDialog(force) {
   try {
+    dbg('showConnectDialog(force=', !!force, ')');
     initialConnectShown = true;
     if (window.statusEl && window.statusEl.textContent !== undefined) {
       window.statusEl.textContent = 'Local: Connecting…';
@@ -139,6 +170,7 @@ function showConnectDialog(force) {
 
 function hideConnectDialog() {
   try {
+    dbg('hideConnectDialog');
     initialConnectShown = false;
     if (window.statusEl && window.statusEl.textContent !== undefined) {
       // Reset to default; pollStatusForHeader will update shortly
@@ -157,6 +189,7 @@ function setConnectedStatus(x32Ip) {
     if (el) el.textContent = 'X32: ' + ip;
     const statusElLocal = document.getElementById('status') || window.statusEl || null;
     if (statusElLocal) statusElLocal.textContent = 'Local: ' + (getApiOrigin() || (location && location.host) || '—');
+    dbg('setConnectedStatus -> X32:', ip, '| Local:', (getApiOrigin() || (location && location.host) || '—'));
   } catch (e) { console.warn('setConnectedStatus failed', e); }
 }
 
@@ -202,45 +235,9 @@ var colorMap = window.colorMap || { null: 'transparent' };
 
 // Lightweight periodic sync to keep the legacy identifiers pointing at the
 // latest values if the server updates `window.*` directly.
-                savePortBtn.onclick = async () => {
-                  try {
-                    const portEl = document.getElementById('localPortInput');
-                    if (!portEl || !portEl.value) { showToast('Enter a port first'); return; }
-                    const portVal = String(portEl.value).trim();
-                    if (!/^\d{2,5}$/.test(portVal)) { showToast('Invalid port'); return; }
-                    savePortBtn.disabled = true;
-                    savePortBtn.textContent = 'Saving…';
-                    try {
-                      const resp = await fetch(apiUrl('/set-port'), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ port: Number(portVal) }) });
-                      const json = await resp.json().catch(()=>null);
-                      if (resp.ok && json && json.ok) {
-                        // Optionally persist the preferred origin for the renderer
-                        const origin = 'http://localhost:' + portVal;
-                        try { localStorage.setItem('dubswitch_api_origin', origin); } catch (e) {}
-                        // Inform the user that a restart is required
-                        showToast('Port saved. Restarting server to apply the change…', 6000);
-                        // If running inside Electron with supervision available, request a supervised restart
-                        try {
-                          if (window.electronAPI && typeof window.electronAPI.restartServer === 'function') {
-                            const r = await window.electronAPI.restartServer();
-                            if (r && r.ok) showToast('Server restart requested.', 3000);
-                            else showToast('Server restart failed: ' + (r && r.error ? r.error : 'unknown'));
-                          } else if (window.electronAPI && typeof window.electronAPI.restartApp === 'function') {
-                            // Fallback: relaunch the whole app
-                            const r2 = await window.electronAPI.restartApp();
-                            if (r2 && r2.ok) showToast('Application relaunch requested.', 3000);
-                            else showToast('Relaunch failed: ' + (r2 && r2.error ? r2.error : 'unknown'));
-                          } else {
-                            // Leave it up to the user to restart manually
-                          }
-                        } catch (e) { console.error('Error requesting restart:', e); }
-                      } else {
-                        const msg = (json && (json.reason || json.error)) ? (json.reason || json.error) : ('HTTP ' + resp.status);
-                        showToast('Failed to change port: ' + msg);
-                      }
-                    } catch (e) { console.error('set-port request failed', e); showToast('Failed to contact server'); }
-                  } finally { try { savePortBtn.disabled = false; savePortBtn.textContent = 'Save Port'; } catch (e){} }
-                };
+// (removed accidental duplicate savePortBtn.onclick assignment that caused a
+// ReferenceError at top-level; the correct handler is wired later inside
+// the DOMContentLoaded block around the Server tab UI.)
             try {
               const restartNowBtn = document.getElementById('restartNowBtn');
               if (restartNowBtn) {
@@ -498,12 +495,14 @@ window.ws = window.ws || null;
 function createWs(url) {
   try {
     if (window.ws && window.ws.readyState <= 1) {
+      dbg('Closing pre-existing WS before creating new one. prev readyState=', window.ws.readyState);
       window.ws.close();
     }
   } catch (e) { /* ignore */ }
+  dbg('WS creating with URL:', url);
   window.ws = new WebSocket(url);
   window.ws.onopen = () => {
-    console.log('WebSocket open ->', url);
+    dbg('WS open ->', url);
     // After opening the WS, request current routing and per-channel user routings
     // so the UI can initialize button states from the device.
     try {
@@ -528,17 +527,44 @@ function createWs(url) {
     } catch (e) { console.warn('initial WS queries failed', e); }
   };
   window.ws.onclose = () => {
-    console.log('WebSocket closed');
+    dbg('WS closed. readyState=', window.ws && window.ws.readyState);
     x32Connected = false;
     showConnectDialog();
     statusEl.textContent = 'Status: Disconnected';
   };
   window.ws.onerror = (e) => {
-    console.log('WebSocket error', e);
+    dbg('WS error:', (e && e.message) || e);
     statusEl.textContent = 'Status: WebSocket error';
   };
-  window.ws.onmessage = handleWsMessage;
+  window.ws.onmessage = function(ev){
+    try {
+      const t = (ev && ev.data && typeof ev.data === 'string') ? (ev.data.startsWith('{') ? (JSON.parse(ev.data).type || 'json') : 'text') : (ev && ev.data && ev.data.type ? ev.data.type : typeof ev);
+      dbg('WS message type:', t);
+    } catch (e) {}
+    handleWsMessage(ev);
+  };
 }
+
+// Fallback boot: if this script was injected after DOMContentLoaded fired,
+// our DOMContentLoaded handlers won't run. In that case, proactively compute
+// the WS URL and start the connection now. Also do nothing if a WS is already open/connecting.
+try {
+  (function bootWsFallback(){
+    try {
+      const already = (window.ws && window.ws.readyState <= 1);
+      if (already) { dbg('Boot fallback: WS already present, skipping. readyState=', window.ws.readyState); return; }
+      let origin = getApiOrigin() || '';
+      let wsUrl = '';
+      if (origin) wsUrl = origin.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:').replace(/\/$/, '');
+      else {
+        const proto = (location && location.protocol === 'https:') ? 'wss:' : 'ws:';
+        wsUrl = proto + '//' + (location && location.host ? location.host : 'localhost:3000');
+      }
+      dbg('Boot fallback -> starting WS with URL:', wsUrl);
+      createWs(wsUrl);
+    } catch (e) { dbg('Boot fallback failed:', e && e.message); }
+  })();
+} catch (e) {}
 
 // MATRIX (static placeholder)
 // The active matrix functionality has been removed per user request. Below
@@ -851,6 +877,33 @@ function renderStaticMatrixTable() {
   } catch (e) {}
 }
 
+// Ensure Matrix table renders even if this script loads after DOMContentLoaded
+(function ensureMatrixRenderedEarly(){
+  async function bootMatrixOnce(){
+    try {
+      // Load persisted matrix once so B defaults are restored
+      try {
+        const resp = await fetch(apiUrl('/get-matrix'));
+        if (resp && resp.ok) { const j = await resp.json().catch(()=>null); if (j && j.matrix) window._persistedMatrix = j.matrix; }
+      } catch (e) {}
+      // Preload enumerate results so A column can preselect known sources
+      try {
+        if (!window.enumerateResults) {
+          const r = await fetch(apiUrl('/enumerate-sources'));
+          if (r && r.ok) { const j = await r.json().catch(()=>null); if (j) window.enumerateResults = j; }
+        }
+      } catch (e) {}
+      try { renderStaticMatrixTable(); } catch (e) {}
+    } catch (e) {}
+  }
+  if (document.readyState === 'loading') {
+    window.addEventListener('DOMContentLoaded', bootMatrixOnce, { once: true });
+  } else {
+    // DOM already parsed; render immediately
+    bootMatrixOnce();
+  }
+})();
+
 // Render static table once DOM ready
 window.addEventListener('DOMContentLoaded', async ()=>{
   try {
@@ -966,9 +1019,11 @@ async function pollStatusForHeader() {
     try {
       resp = await fetch(apiUrl('/status'));
       if (resp && resp.ok) j = await resp.json().catch(()=>null);
+      dbg('/status primary origin OK:', !!(resp && resp.ok));
     } catch (e) {
       // network error contacting configured origin — we'll try fallbacks below
       resp = null; j = null;
+      dbg('/status primary origin failed:', e && e.message);
     }
     // If the configured origin is unreachable, try a small set of sensible fallbacks
     if (!resp || !resp.ok) {
@@ -990,6 +1045,7 @@ async function pollStatusForHeader() {
         tried.add(c);
         try {
           const u = c.replace(/\/$/, '') + '/status';
+          dbg('Probing fallback origin:', u);
           const r = await fetch(u, { cache: 'no-store' });
           if (r && r.ok) {
             const parsed = await r.json().catch(()=>null);
@@ -1002,9 +1058,11 @@ async function pollStatusForHeader() {
         try { localStorage.setItem('dubswitch_api_origin', origin); } catch (e) {}
         window.__DUBSWITCH_API_ORIGIN__ = origin;
         j = found.json;
+        dbg('Switched API origin to fallback:', origin);
   // Inform the user that origin was switched; user may need to reload
   try { showToast('Switched API origin to ' + origin + '. Reload the app to apply.', 4000); } catch (e) {}
       } else {
+        dbg('All fallback origins failed.');
         // No candidate worked — surface a clear preview and stop here
         try {
           const preview = document.getElementById('serverStatusPreview');
@@ -1138,6 +1196,8 @@ window.addEventListener('DOMContentLoaded', ()=>{
         const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
         wsUrl = proto + '//' + location.host;
       }
+      dbg('Computed origin:', origin || '(relative)');
+      dbg('Computed WS URL:', wsUrl);
       createWs(wsUrl);
     } catch (e) { console.warn('createWs failed', e); }
 
@@ -1321,6 +1381,7 @@ function handleWsMessage(ev) {
   try {
     const raw = ev && ev.data ? ev.data : ev;
     const data = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    try { dbg('WS <=', data && data.type ? data.type : typeof data); } catch (e) {}
 
     // Handle server broadcast for persisted matrix updates first
     if (data && data.type === 'matrix_update') {
@@ -1350,7 +1411,7 @@ function handleWsMessage(ev) {
         break;
       case 'routing':
         if (Array.isArray(data.values)) {
-          console.debug('[WS] received routing', data.values);
+          dbg('[WS] routing values:', data.values);
           window.routingState = data.values.slice();
           // Clear any _blockTogglePending flags for blocks whose routing now matches
           try {
@@ -1398,7 +1459,7 @@ function handleWsMessage(ev) {
               const rawArg = data.args[0];
               const val = (rawArg && typeof rawArg === 'object' && 'value' in rawArg) ? rawArg.value : rawArg;
               window.userPatches = window.userPatches || {}; window.userPatches[ch] = Number(val);
-              console.debug('[UI] Received userpatch for ch', ch, '=>', window.userPatches[ch]);
+              dbg('[UI] userpatch ch', ch, '=>', window.userPatches[ch]);
               try { window.userPatchesPending = false; renderUserPatches(); checkUserIns(); } catch (e) {}
             }
           } else if (/^\/ch\/(\d{2})\/config\/name$/.test(data.address)) {
@@ -1967,10 +2028,150 @@ window.addEventListener('DOMContentLoaded', ()=>{
   } catch (e) {}
 });
 
+// --- UI wiring fallback: ensure buttons work even if DOMContentLoaded already fired ---
+(function ensureCoreButtonsWired(){
+  function wireOnce(id, handler){
+    try {
+      const el = document.getElementById(id);
+      if (el && !el.dataset.wired) { el.addEventListener('click', handler); el.dataset.wired = '1'; }
+    } catch (e) {}
+  }
+  function wireDiagnosticsGroup(){
+    try {
+      const diagBtn = document.getElementById('diagnosticsBtn');
+      if (diagBtn && !diagBtn.dataset.wired) {
+        diagBtn.dataset.wired = '1';
+        diagBtn.addEventListener('click', ()=>{
+          try {
+            try { dbg('diagnosticsBtn click (fallback)'); } catch(_){}
+            if (window.jQuery) window.jQuery('#diagnosticsModal').modal('show');
+            else {
+              const m = document.getElementById('diagnosticsModal');
+              if (m) {
+                m.classList.add('show'); m.style.display='block';
+                // simple backdrop if bootstrap JS not active
+                let backdrop = document.querySelector('.modal-backdrop');
+                if (!backdrop) { backdrop = document.createElement('div'); backdrop.className = 'modal-backdrop fade show'; document.body.appendChild(backdrop); }
+                document.body.classList.add('modal-open');
+              }
+            }
+            if (typeof fetchDiagnostics === 'function') fetchDiagnostics();
+            // Start auto-refresh every 4s while modal is open
+            try {
+              if (window.__diagnosticsAutoInterval) clearInterval(window.__diagnosticsAutoInterval);
+              window.__diagnosticsAutoInterval = setInterval(()=>{
+                const mod = document.getElementById('diagnosticsModal');
+                if (!mod) return;
+                const isOpen = window.jQuery ? window.jQuery(mod).hasClass('show') : (mod.style.display !== 'none' && mod.classList.contains('show'));
+                if (isOpen) { if (typeof fetchDiagnostics === 'function') fetchDiagnostics(); }
+                else { try { clearInterval(window.__diagnosticsAutoInterval); window.__diagnosticsAutoInterval = null; } catch(_){} }
+              }, 4000);
+            } catch(_){}
+          } catch (e) { try { showToast('Failed to open diagnostics'); } catch(_){} }
+        }, { passive: true });
+      }
+      const diagRefresh = document.getElementById('diagnostics-refresh');
+      if (diagRefresh && !diagRefresh.dataset.wired) { diagRefresh.dataset.wired = '1'; diagRefresh.addEventListener('click', fetchDiagnostics, { passive: true }); }
+      const diagCopyStatus = document.getElementById('diagnostics-copy-status');
+      if (diagCopyStatus && !diagCopyStatus.dataset.wired) {
+        diagCopyStatus.dataset.wired = '1';
+        diagCopyStatus.addEventListener('click', ()=>{ const out = document.getElementById('diagnostics-status'); if (!out) return; navigator.clipboard.writeText(out.textContent||'').then(()=> showToast('Status copied to clipboard')).catch(()=> showToast('Copy failed')); }, { passive: true });
+      }
+      const diagCopyMatrix = document.getElementById('diagnostics-copy-matrix');
+      if (diagCopyMatrix && !diagCopyMatrix.dataset.wired) {
+        diagCopyMatrix.dataset.wired = '1';
+        diagCopyMatrix.addEventListener('click', ()=>{ const out = document.getElementById('diagnostics-matrix-file'); if (!out) return; navigator.clipboard.writeText(out.textContent||'').then(()=> showToast('Matrix info copied')).catch(()=> showToast('Copy failed')); }, { passive: true });
+      }
+    } catch (e) {}
+  }
+  function wireSettingsBtn(){
+    try {
+      const settingsBtn = document.getElementById('settingsBtn');
+      if (settingsBtn && !settingsBtn.dataset.wired) {
+        settingsBtn.dataset.wired = '1';
+        settingsBtn.addEventListener('click', (e) => {
+          try {
+            try { dbg('settingsBtn click (fallback)'); } catch(_){}
+            if (window.jQuery && typeof window.jQuery === 'function') {
+              window.jQuery('#settingsModal').modal('show');
+              return;
+            }
+            const modal = document.getElementById('settingsModal');
+            if (!modal) return;
+            modal.classList.add('show');
+            modal.style.display = 'block';
+            modal.setAttribute('aria-modal', 'true');
+            let backdrop = document.querySelector('.modal-backdrop');
+            if (!backdrop) { backdrop = document.createElement('div'); backdrop.className = 'modal-backdrop fade show'; document.body.appendChild(backdrop); }
+            else { backdrop.classList.add('show'); }
+            document.body.classList.add('modal-open');
+          } catch (err) {
+            try { const modal = document.getElementById('settingsModal'); if (modal) { modal.style.display = 'block'; modal.classList.add('show'); } } catch(e){}
+          }
+        });
+      }
+    } catch (e) {}
+  }
+  function wireAll(){ wireSettingsBtn(); wireDiagnosticsGroup(); }
+  // Also wire Matrix tab activation to re-render its content
+  try {
+    const tabLink = document.getElementById('tab-matrix-link');
+    if (tabLink && !tabLink.dataset.wired) {
+      tabLink.dataset.wired = '1';
+      const activate = async () => {
+        try {
+          dbg && dbg('Matrix tab activated: ensuring table render');
+          // Try to refresh persisted data once when the tab is opened
+          try {
+            const resp = await fetch(apiUrl('/get-matrix'));
+            if (resp && resp.ok) { const j = await resp.json().catch(()=>null); if (j && j.matrix) window._persistedMatrix = j.matrix; }
+          } catch (e) {}
+          try { renderStaticMatrixTable(); } catch (e) {}
+        } catch (e) {}
+      };
+      tabLink.addEventListener('click', activate, { passive: true });
+      // If Bootstrap tabs are present, also react to the "shown" event
+      try { if (window.jQuery) window.jQuery(tabLink).on('shown.bs.tab', activate); } catch (_) {}
+    }
+  } catch (e) {}
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', wireAll, { once: true });
+  } else {
+    // DOM already parsed, wire now
+    wireAll();
+  }
+})();
+
+// Fallback: support [data-dismiss="modal"] close buttons without Bootstrap JS
+(function addModalDismissFallback(){
+  try {
+    document.addEventListener('click', function(ev){
+      let t = ev.target;
+      while (t && t !== document) {
+        if (t.matches && t.matches('[data-dismiss="modal"]')) {
+          const modal = t.closest('.modal');
+          if (!modal) return;
+          if (window.jQuery && typeof window.jQuery === 'function') {
+            try { window.jQuery(modal).modal('hide'); } catch(_){}
+          } else {
+            modal.classList.remove('show');
+            modal.style.display = 'none';
+            const backdrop = document.querySelector('.modal-backdrop'); if (backdrop) backdrop.remove();
+            document.body.classList.remove('modal-open');
+          }
+          return;
+        }
+        t = t.parentNode;
+      }
+    }, true);
+  } catch (_) {}
+})();
+
 // Message handling is centralized in handleWsMessage which is assigned
 // to window.ws.onmessage inside createWs(). No duplicate handlers here.
 
 window.onload=()=>{
+  dbg('window.onload fired');
   showConnectDialog(true);
   initialConnectShown = false;
   x32Connected = false;
@@ -1980,6 +2181,7 @@ window.onload=()=>{
       hideConnectDialog();
       setConnectedStatus(window.lastX32Ip);
     } else {
+      dbg('Still not connected after initial delay; starting interval watcher.');
       connectDialogTimeout = setInterval(()=>{
         if (x32Connected) {
           hideConnectDialog();

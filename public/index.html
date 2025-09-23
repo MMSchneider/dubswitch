@@ -424,6 +424,7 @@
     (function(){
       function insertScript(src, onload, onerror){
         var s = document.createElement('script'); s.src = src; s.defer = true;
+        try { if (window.__DUBSWITCH_DEBUG__ || location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') { console.log('[DubSwitch] inserting <script> =>', src); } } catch (e) {}
         if (onload) s.onload = onload; if (onerror) s.onerror = onerror; document.head.appendChild(s);
         return s;
       }
@@ -436,26 +437,29 @@
       // Helper to load the app script after vendors are ready
       function loadApp(){
         // Insert the main app script (deferred) so it runs after vendor scripts
-        insertScript('app.js');
+        try { if (window.__DUBSWITCH_DEBUG__ || location.protocol === 'file:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1') { console.log('[DubSwitch] loading app.js'); } } catch (e) {}
+        insertScript('app.js', function(){ try { console.log('[DubSwitch] app.js loaded'); } catch (e) {} }, function(){ try { console.warn('[DubSwitch] app.js failed to load'); } catch (e) {} });
       }
 
       // Load bootstrap (prefer CDN) — called only after jQuery is available or attempted
       function loadBootstrapBundle(){
-        insertScript(bootstrapCdn, function(){ loadApp(); }, function(){ insertScript(localBootstrapBundle, loadApp); });
+        insertScript(bootstrapCdn, function(){ try { console.log('[DubSwitch] bootstrap.bundle CDN loaded'); } catch (e) {} ; loadApp(); }, function(){ try { console.warn('[DubSwitch] bootstrap.bundle CDN failed, falling back to local'); } catch (e) {} ; insertScript(localBootstrapBundle, function(){ try { console.log('[DubSwitch] local bootstrap.bundle loaded'); } catch (e) {} ; loadApp(); }, function(){ try { console.warn('[DubSwitch] local bootstrap.bundle failed to load'); } catch (e) {} ; loadApp(); }); });
       }
 
       try {
         if (location.protocol === 'file:'){
           // Packaged/offline: load local vendor files in sequence, then the app
-          insertScript(localJq, function(){ insertScript(localBootstrapBundle, loadApp); }, function(){ console.warn('Local jQuery failed to load'); insertScript(localBootstrapBundle, loadApp); });
+          insertScript(localJq, function(){ try { console.log('[DubSwitch] local jQuery loaded'); } catch (e) {} ; insertScript(localBootstrapBundle, function(){ try { console.log('[DubSwitch] local bootstrap.bundle loaded'); } catch (e) {} ; loadApp(); }, function(){ try { console.warn('[DubSwitch] local bootstrap.bundle failed'); } catch (e) {} ; loadApp(); }); }, function(){ try { console.warn('[DubSwitch] Local jQuery failed to load'); } catch (e) {} ; insertScript(localBootstrapBundle, function(){ try { console.log('[DubSwitch] local bootstrap.bundle loaded (no jQuery)'); } catch (e) {} ; loadApp(); }, function(){ try { console.warn('[DubSwitch] local bootstrap.bundle failed (no jQuery)'); } catch (e) {} ; loadApp(); }); });
         } else {
           // Web context: load jQuery first, then bootstrap. Fallback to local jQuery when CDN fails.
           insertScript(jqueryCdn, function(){
             // jQuery CDN loaded successfully
+            try { console.log('[DubSwitch] jQuery CDN loaded'); } catch (e) {}
             loadBootstrapBundle();
           }, function(){
             // jQuery CDN failed; try local jQuery then load bootstrap
-            insertScript(localJq, function(){ loadBootstrapBundle(); }, function(){ console.warn('Local jQuery failed to load'); loadBootstrapBundle(); });
+            try { console.warn('[DubSwitch] jQuery CDN failed, trying local'); } catch (e) {}
+            insertScript(localJq, function(){ try { console.log('[DubSwitch] local jQuery loaded'); } catch (e) {} ; loadBootstrapBundle(); }, function(){ try { console.warn('[DubSwitch] Local jQuery failed to load'); } catch (e) {} ; loadBootstrapBundle(); });
           });
         }
       } catch (e) { console.warn('vendor loader failed', e); }
@@ -472,6 +476,18 @@
           s.defer = true;
           document.head.appendChild(s);
         }
+        // Small debug banner with origin + WS URL
+        try {
+          const debugOn = (window.__DUBSWITCH_DEBUG__ === true) || (location.protocol === 'file:') || host === 'localhost' || host === '127.0.0.1' || /[?&]debug=1\b/.test(location.search||'');
+          if (debugOn) {
+            const el = document.createElement('div');
+            el.style.cssText = 'position:fixed;left:8px;bottom:8px;background:rgba(0,0,0,0.65);color:#cfeee8;padding:6px 10px;border-radius:6px;z-index:20000;font:12px/1.2 monospace';
+            var originTxt = (typeof getApiOrigin === 'function') ? (getApiOrigin() || '(relative)') : 'unknown';
+            var wsTxt = (function(){ try { var o = (typeof getApiOrigin === 'function') ? (getApiOrigin() || '') : ''; if (o) return o.replace(/^http:/,'ws:').replace(/^https:/,'wss:').replace(/\/$/,''); var p = (location.protocol==='https:'?'wss:':'ws:'); return p + '//' + location.host; } catch(e){ return 'n/a'; } })();
+            el.textContent = 'Origin: ' + originTxt + ' | WS: ' + wsTxt;
+            document.body.appendChild(el);
+          }
+        } catch (e) {}
       } catch (e) {}
     })();
   </script>
