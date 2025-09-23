@@ -65,7 +65,7 @@ Just fast overdubs, per-channel control, and total session clarity.
 
 1. **Clone the repository**
     ```sh
-    git clone https://github.com/yourusername/dubswitch.git
+    git clone https://github.com/MMSchneider/dubswitch.git
     cd dubswitch
     ```
 2. **Install dependencies**
